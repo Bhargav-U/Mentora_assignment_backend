@@ -16,7 +16,7 @@ export const createSessionController = async (req, res, next) => {
 
 export const getLessonSessionsController = async (req, res, next) => {
   try {
-    const sessions = await getSessionsByLessonId(req.params.id);
+    const sessions = await getSessionsByLessonId(req.params.id, req.user);
     res.status(200).json(sessions);
   } catch (error) {
     next(error);

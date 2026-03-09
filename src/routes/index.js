@@ -7,6 +7,8 @@ import sessionsRoutes from "./sessions.routes.js";
 import parentRoutes from "./parent.routes.js";
 import mentorRoutes from "./mentor.routes.js";
 import llmRoutes from "./llm.routes.js";
+import authMiddleware from "../middleware/auth.middleware.js";
+import { me } from "../controllers/auth.controller.js";
 
 const router = Router();
 
@@ -22,6 +24,8 @@ router.get("/health", (req, res) => {
     status: "ok",
   });
 });
+
+router.get("/me", authMiddleware, me);
 
 router.use("/auth", authRoutes);
 router.use("/students", studentsRoutes);

@@ -2015,11 +2015,6 @@ This generates a 128-character hexadecimal string suitable for JWT signing.
 
 #### Step 1: Clone Repository
 
-```bash
-git clone https://github.com/yourusername/mentora-backend.git
-cd mentora-backend
-```
-
 #### Step 2: Install Dependencies
 
 ```bash

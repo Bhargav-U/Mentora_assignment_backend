@@ -1926,10 +1926,10 @@ PORT=3000
 # Format: postgresql://<username>:<password>@<host>:<port>/<database>
 
 # Local development (PostgreSQL running on localhost)
-# DATABASE_URL=postgresql://root:rootpass@localhost:5432/mentora
+# DATABASE_URL=postgresql://root:root@localhost:5432/mentora
 
 # Docker deployment (PostgreSQL in container named 'mentoraDB')
-# DATABASE_URL=postgresql://root:rootpass@mentoraDB:5432/mentora
+# DATABASE_URL=postgresql://root:root@mentoraDB:5432/mentora
 
 DATABASE_URL=postgresql://<db_user>:<db_password>@<db_host>:5432/<db_name>
 
@@ -2044,7 +2044,7 @@ cp .env.example .env
 
 Edit `.env` and fill in your values:
 ```env
-DATABASE_URL=postgresql://root:rootpass@localhost:5432/mentora
+DATABASE_URL=postgresql://root:root@localhost:5432/mentora
 JWT_SECRET=<generate with: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))">
 GEMINI_API_KEY=<get from https://aistudio.google.com/app/apikey>
 ```
@@ -2671,50 +2671,27 @@ npm install cors
 
 ## License
 
-Copyright (C) 2026 Unnam Bhargav Sai Karthikeya Chowdary
+MIT License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+Copyright (c) 2026 Unnam Bhargav Sai Karthikeya Chowdary
 
-### Terms
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-You are free to:
-- ✅ **Use** — Run the software for any purpose
-- ✅ **Study** — Examine how the software works
-- ✅ **Modify** — Change the software to suit your needs
-- ✅ **Distribute** — Share copies of the software
-- ✅ **Commercial use** — Use the software for commercial purposes
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-### Conditions
-
-You **must**:
-- 📄 **Disclose source** — Make the source code available when distributing
-- 📝 **Include license** — Include the GPL-3.0 license text with the software
-- 🔄 **Same license** — Distribute derivative works under GPL-3.0
-- 📋 **State changes** — Document modifications made to the software
-
-### Prohibited
-
-You **cannot**:
-- ❌ **Sublicense** — Change the license of the software or derivative works
-- ❌ **Close source** — Distribute without making source code available
-- ❌ **Proprietary forks** — Create closed-source derivatives
-
-### Legal Notice
-
-**Closing the source, sublicensing under a proprietary license, or distributing modified versions without making the source code available under GPL-3.0 constitutes a violation of this license and will be subject to legal action.**
-
-### Full License Text
-
-See the full license at: [https://www.gnu.org/licenses/gpl-3.0.en.html](https://www.gnu.org/licenses/gpl-3.0.en.html)
-
-### Why GPL-3.0?
-
-This license ensures that:
-1. The educational community benefits from improvements
-2. Derivative works remain open source
-3. Commercial use is permitted while maintaining transparency
-4. The software's freedom is preserved across all versions
-
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ---
 
 ## Typical Workflow Example
@@ -2853,6 +2830,456 @@ curl -X POST "$BASE_URL/llm/summarize" \
 ```
 
 ---
+## Future Enhancements
+
+The current implementation provides a solid foundation for a tutoring platform. The following enhancements are planned for future iterations to improve discoverability, functionality, observability, and user experience.
+
+---
+
+### 1. Subject-Based Lesson Categorization
+
+**Goal:** Enable quick lesson discovery through subject tags and filtering.
+
+**Implementation:**
+- Add `subject` field to lessons table with predefined categories (Math, Science, Programming, Languages, Arts, etc.)
+- Support multiple subject tags per lesson via a `lesson_subjects` join table
+- Implement filtering endpoints:
+  ```
+  GET /lessons?subject=Math
+  GET /lessons?subject=Programming,Science
+  ```
+- Add subject-based search with autocomplete
+- Create subject-specific lesson recommendations
+
+**Benefits:**
+- Faster lesson discovery for parents and students
+- Improved lesson organization for mentors
+- Better analytics on popular subjects
+
+---
+
+### 2. Session Media Integration
+
+**Goal:** Allow mentors to attach video recordings or live meeting links to sessions.
+
+**Implementation:**
+- Add `media` field to sessions table:
+  ```json
+  {
+    "type": "video" | "live_meeting",
+    "url": "https://zoom.us/j/123456789" | "https://s3.amazonaws.com/...",
+    "platform": "Zoom" | "Google Meet" | "Microsoft Teams" | "Recorded",
+    "duration_minutes": 60,
+    "access_expires_at": "2026-12-31T23:59:59Z"
+  }
+  ```
+- Create new endpoint: `GET /sessions/:id/media`
+- Validate URLs before storage (check domain whitelist)
+- Implement access control:
+  - Only enrolled students and session owner can access media
+  - Temporary signed URLs for recorded videos (S3 presigned URLs)
+  - Meeting link visibility control (show 15 minutes before session starts)
+- Track media engagement:
+  - Video watch time
+  - Live session attendance
+  - Completion rates
+
+**Benefits:**
+- Centralized access to all session materials
+- Flexible delivery (live or recorded)
+- Better tracking of student engagement
+- Support for asynchronous learning
+
+---
+
+### 3. Observability Stack Integration
+
+**Goal:** Implement comprehensive monitoring, logging, and alerting using industry-standard tools.
+
+**Implementation:**
+
+#### **Metrics — Prometheus + Grafana**
+- Instrument backend with `prom-client`:
+  ```javascript
+  // Metrics to track:
+  - HTTP request rate, duration, error rate (RED metrics)
+  - Database connection pool usage
+  - JWT token generation/validation rate
+  - LLM API calls, latency, success rate
+  - Active users, lessons, bookings
+  - Session creation rate
+  ```
+- Deploy Prometheus server to scrape `/metrics` endpoint
+- Create Grafana dashboards:
+  - **System Health:** CPU, memory, disk, network
+  - **API Performance:** Request latency p50/p95/p99, throughput
+  - **Business Metrics:** Active users, new signups, lesson bookings
+  - **LLM Usage:** Summarization requests, token consumption, costs
+
+#### **Logging — InfluxDB (Time-Series)**
+- Replace console.log with structured logging (Winston or Pino)
+- Send logs to InfluxDB for time-series analysis
+- Track:
+  - User authentication events
+  - Booking transactions
+  - LLM API usage patterns
+  - Error rates by endpoint
+- Retention policies (7 days for debug logs, 90 days for audit logs)
+
+#### **Alerting**
+- Set up Prometheus Alertmanager:
+  - Alert on API error rate > 5%
+  - Alert on database connection pool exhaustion
+  - Alert on LLM API failures
+  - Alert on JWT secret rotation needed
+- Integrate with Slack/PagerDuty for incident response
+
+**Benefits:**
+- Real-time visibility into system health
+- Proactive issue detection before users complain
+- Data-driven capacity planning
+- Performance optimization insights
+
+---
+
+### 4. OAuth 2.0 Google Sign-In
+
+**Goal:** Replace traditional email/password authentication with Google OAuth for enhanced security and user convenience.
+
+**Implementation:**
+
+#### **Backend Changes**
+- Add OAuth flow using `passport-google-oauth20`:
+  ```javascript
+  GET /auth/google          // Redirect to Google consent screen
+  GET /auth/google/callback // Handle OAuth callback
+  ```
+- Store Google user data:
+  ```sql
+  ALTER TABLE users ADD COLUMN google_id VARCHAR(255) UNIQUE;
+  ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT false;
+  ALTER TABLE users ADD COLUMN avatar_url TEXT;
+  ```
+- Support hybrid authentication:
+  - Users can sign up with Google OR email/password
+  - Link Google account to existing email/password account
+- Email verification via Google eliminates need for custom email verification flow
+
+#### **Security Improvements**
+- Gmail addresses guaranteed to be valid and owned by user
+- No password storage for OAuth users (reduces breach impact)
+- Leverage Google's 2FA for enhanced security
+- Automatic email verification
+
+#### **User Experience**
+- One-click signup/login for users with Google accounts
+- Auto-populate profile (name, email, avatar) from Google
+- Faster onboarding (no password creation required)
+
+**Migration Strategy:**
+- Existing users keep email/password auth
+- New users can choose Google or traditional signup
+- Gradual migration via email prompts: "Sign in with Google for faster access"
+
+**Benefits:**
+- Reduced friction in signup process
+- Higher conversion rates (one-click vs. form filling)
+- Better security (no weak passwords)
+- Reduced support burden (fewer password reset requests)
+
+---
+
+### 5. Advanced Lesson Metadata and Filtering
+
+**Goal:** Add rich metadata to lessons for sophisticated discovery and personalization.
+
+**Implementation:**
+
+#### **New Lesson Fields**
+```sql
+ALTER TABLE lessons ADD COLUMN location_type VARCHAR(20); -- 'online', 'in-person', 'hybrid'
+ALTER TABLE lessons ADD COLUMN address TEXT;              -- For in-person lessons
+ALTER TABLE lessons ADD COLUMN languages TEXT[];          -- ['English', 'Spanish', 'Hindi']
+ALTER TABLE lessons ADD COLUMN difficulty_level VARCHAR(20); -- 'beginner', 'intermediate', 'advanced'
+ALTER TABLE lessons ADD COLUMN min_age INT;
+ALTER TABLE lessons ADD COLUMN max_age INT;
+ALTER TABLE lessons ADD COLUMN price_per_session DECIMAL(10,2);
+ALTER TABLE lessons ADD COLUMN max_students INT;          -- Class size limit
+ALTER TABLE lessons ADD COLUMN timezone VARCHAR(50);      -- 'America/New_York'
+```
+
+#### **Enhanced Filtering**
+```javascript
+GET /lessons?location=online
+GET /lessons?language=English,Spanish
+GET /lessons?difficulty=beginner
+GET /lessons?age_group=8-12
+GET /lessons?price_max=50
+GET /lessons?subject=Math&location=online&language=English
+```
+
+#### **Geolocation Features**
+- Store mentor location (latitude, longitude)
+- Find lessons within X miles of user:
+  ```
+  GET /lessons/nearby?lat=40.7128&lng=-74.0060&radius=10
+  ```
+- Display lessons on interactive map (frontend)
+
+#### **Multi-Language Support**
+- Lessons taught in multiple languages
+- UI language selection for platform
+- Automatic translation of lesson descriptions (Google Translate API)
+
+**Benefits:**
+- Better lesson matching for diverse user base
+- Support for global mentorship (online lessons across timezones)
+- Localized experience for non-English speakers
+- Price transparency and budget filtering
+
+---
+
+### 6. Payment Gateway Integration
+
+**Goal:** Monetize the platform by implementing paid lesson enrollments with secure payment processing.
+
+**Implementation:**
+
+#### **Payment Provider Integration (Stripe)**
+- Add Stripe SDK and webhooks
+- New endpoints:
+  ```javascript
+  POST /payments/create-checkout-session  // Initialize payment
+  POST /payments/webhook                  // Handle Stripe events
+  GET /payments/history                   // User payment history
+  ```
+
+#### **Database Schema**
+```sql
+CREATE TABLE payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID REFERENCES students(id),
+  lesson_id UUID REFERENCES lessons(id),
+  amount DECIMAL(10,2) NOT NULL,
+  currency VARCHAR(3) DEFAULT 'USD',
+  status VARCHAR(20), -- 'pending', 'completed', 'failed', 'refunded'
+  stripe_payment_intent_id VARCHAR(255),
+  stripe_session_id VARCHAR(255),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE lesson_pricing (
+  lesson_id UUID REFERENCES lessons(id),
+  price_per_session DECIMAL(10,2),
+  price_per_month DECIMAL(10,2),   -- Subscription model
+  trial_sessions INT DEFAULT 0,     -- Free trial sessions
+  currency VARCHAR(3) DEFAULT 'USD'
+);
+```
+
+#### **Payment Flow**
+1. Parent browses lessons → sees pricing
+2. Parent clicks "Enroll & Pay" → redirected to Stripe Checkout
+3. Stripe processes payment → sends webhook to backend
+4. Backend verifies webhook signature → creates booking
+5. Student gets access to lesson sessions
+6. Email receipt sent to parent
+
+#### **Pricing Models**
+- **Pay-per-session:** Parent pays for individual sessions
+- **Monthly subscription:** Unlimited sessions in a lesson for fixed monthly fee
+- **Package deals:** Buy 10 sessions, get 2 free
+- **Trial periods:** First 2 sessions free, then paid
+
+#### **Security & Compliance**
+- Never store credit card details (Stripe handles PCI compliance)
+- Webhook signature verification
+- Idempotency keys for payment retries
+- Refund handling for cancelled sessions
+
+#### **Revenue Sharing**
+- Platform takes commission (e.g., 15%) from each transaction
+- Mentors receive payouts via Stripe Connect
+- Automatic payout scheduling (weekly/monthly)
+
+**Benefits:**
+- Revenue generation for platform sustainability
+- Professional monetization for mentors
+- Transparent pricing for parents
+- Secure, trusted payment processing
+
+---
+
+### 7. Admin Dashboard and Management System
+
+**Goal:** Provide platform administrators with tools to monitor, manage, and moderate the entire application.
+
+**Implementation:**
+
+#### **New Admin User Role**
+```sql
+ALTER TABLE users ADD COLUMN role VARCHAR(20) CHECK (role IN ('PARENT', 'MENTOR', 'STUDENT', 'ADMIN'));
+```
+
+#### **Admin Endpoints**
+```javascript
+// User Management
+GET    /admin/users                      // List all users with filters
+GET    /admin/users/:id                  // User details + activity
+PUT    /admin/users/:id/suspend          // Suspend user account
+PUT    /admin/users/:id/unsuspend        // Reactivate account
+DELETE /admin/users/:id                  // Permanently delete user
+
+// Content Moderation
+GET    /admin/lessons/pending            // Lessons awaiting approval
+PUT    /admin/lessons/:id/approve        // Approve lesson
+PUT    /admin/lessons/:id/reject         // Reject lesson (with reason)
+DELETE /admin/lessons/:id                // Remove inappropriate lesson
+
+// Platform Analytics
+GET    /admin/analytics/overview         // High-level metrics
+GET    /admin/analytics/revenue          // Payment metrics
+GET    /admin/analytics/engagement       // User activity metrics
+
+// System Logs
+GET    /admin/logs?level=error           // Filter logs by level
+GET    /admin/logs?user_id=123           // User-specific logs
+GET    /admin/logs?date_range=...        // Time-based logs
+
+// Access Control
+GET    /admin/permissions                // List all role permissions
+PUT    /admin/permissions/:role          // Modify role permissions
+GET    /admin/audit-trail                // All admin actions logged
+```
+
+#### **Admin Dashboard Features**
+
+**User Management:**
+- View all users (parents, mentors, students, admins)
+- Search by username, email, role
+- Suspend/ban users for policy violations
+- Reset user passwords
+- Merge duplicate accounts
+- View user activity history (logins, bookings, sessions)
+
+**Content Moderation:**
+- Review flagged lessons for inappropriate content
+- Approve/reject new mentor applications
+- Monitor session topics for policy compliance
+- Handle user-reported content
+
+**Platform Monitoring:**
+- Real-time active users count
+- System health status (API, database, LLM service)
+- Error rates by endpoint
+- Slow query detection
+- Database connection pool usage
+
+**Financial Oversight:**
+- Total revenue (daily, monthly, yearly)
+- Revenue by lesson, mentor, subject
+- Failed payment tracking
+- Refund requests and approvals
+- Mentor payout status
+
+**Security & Compliance:**
+- Failed login attempts (potential brute force)
+- API rate limit violations
+- Suspicious activity alerts
+- GDPR data export requests
+- Right to be forgotten (data deletion)
+
+**Configuration Management:**
+- Modify platform settings (LLM rate limits, session durations)
+- Feature flags (enable/disable features for testing)
+- Environment variable management (non-sensitive)
+- Email template editing
+
+#### **Admin Dashboard UI (Frontend)**
+- Built with React Admin or Retool
+- Charts and graphs (Recharts, Chart.js)
+- Real-time updates (WebSocket for live metrics)
+- Dark mode for late-night monitoring
+
+#### **Access Control & Audit Trail**
+- Admin actions logged to `admin_audit_log` table:
+  ```sql
+  CREATE TABLE admin_audit_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_id UUID REFERENCES users(id),
+    action VARCHAR(50),  -- 'suspend_user', 'delete_lesson', etc.
+    target_type VARCHAR(20), -- 'user', 'lesson', 'session'
+    target_id UUID,
+    reason TEXT,
+    ip_address INET,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+  ```
+- Two-factor authentication required for admin accounts
+- Admin actions require reason/justification
+- Admins cannot modify their own permissions
+
+**Benefits:**
+- Centralized platform management
+- Faster response to user issues and reports
+- Data-driven decision making
+- Compliance with regulations (GDPR, COPPA)
+- Reduced operational overhead
+
+---
+
+## Implementation Priority
+
+Based on impact and complexity, recommended implementation order:
+
+| Priority | Enhancement | Impact | Complexity | Timeline |
+|----------|------------|--------|-----------|----------|
+| **1** | Subject Tags | High | Low | 1 week |
+| **2** | Session Media Links | High | Medium | 2 weeks |
+| **3** | Advanced Filtering (Location, Language) | High | Medium | 2 weeks |
+| **4** | Google OAuth | Medium | Medium | 2 weeks |
+| **5** | Payment Gateway | High | High | 4 weeks |
+| **6** | Observability Stack | Medium | Medium | 3 weeks |
+| **7** | Admin Dashboard | Medium | High | 4 weeks |
+
+**Total estimated timeline for all enhancements:** ~18 weeks (4.5 months)
+
+---
+
+## Technical Considerations
+
+### Database Migration Strategy
+- Use Flyway or Knex.js for version-controlled migrations
+- Zero-downtime migrations with backward-compatible changes
+- Rollback plans for each migration
+
+### API Versioning
+- Introduce `/v1/` prefix to current endpoints
+- New features in `/v2/` with deprecation notices for v1
+- Support both versions during transition period
+
+### Performance Optimization
+- Implement Redis caching for frequently accessed data (lesson lists, user profiles)
+- Database query optimization (indexes on filtered columns)
+- CDN for static assets (lesson images, videos)
+- Lazy loading for large lists (pagination)
+
+### Security Hardening
+- Rate limiting on all endpoints (not just LLM)
+- Input sanitization against XSS and SQL injection
+- CORS configuration with whitelist
+- Content Security Policy headers
+- Regular dependency audits (`npm audit`)
+
+### Scalability Planning
+- Horizontal scaling with load balancer (Nginx, AWS ALB)
+- Database read replicas for reporting queries
+- Microservices architecture for high-traffic features (payments, LLM)
+- Message queue for async tasks (email sending, notifications)
+
+---
+
+*These enhancements will transform Mentora from a functional MVP into a production-ready, scalable tutoring platform capable of serving thousands of users while maintaining high performance, security, and user satisfaction.*
 
 *Mentora is built for **clarity and scale** — with a clean service-oriented architecture that keeps routing, business logic, validation, and external integrations clearly separated and independently maintainable.*
 

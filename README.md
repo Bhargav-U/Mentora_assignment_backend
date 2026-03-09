@@ -2,7 +2,7 @@
 
 **A full-stack tutoring platform** for managing students, lessons, sessions, and AI-powered text summarization — built with a modular Node.js/Express backend, a React/TypeScript frontend, and deployed end-to-end on cloud infrastructure.
 
-🌐 **Live Application:** [mentora-app.unnambhargav.in](https://mentora-app.unnambhargav.in)
+🌐 **Live Application:** [mentora-app.unnambhargav.in](https://mentora-app.unnambhargav.in)  
 ⚡ **Live API:** [mentora-assignment-api.unnambhargav.in/api](https://mentora-assignment-api.unnambhargav.in/api)
 
 ---
@@ -24,6 +24,7 @@
 - [Design Decisions](#design-decisions)
 - [Authentication & Authorization](#authentication--authorization)
 - [Validation](#validation)
+  - [Input Format Flexibility](#input-format-flexibility)
 - [Error Handling](#error-handling)
 - [API Reference](#api-reference)
 - [API Usage Guide](#api-usage-guide)
@@ -31,21 +32,30 @@
 - [Getting Started](#getting-started)
   - [Option A — Local Development](#option-a--local-development)
   - [Option B — Docker Deployment](#option-b--docker-deployment)
+- [Testing](#testing)
+- [Known Limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
 - [License](#license)
 
 ---
 
 ## Overview
 
-Mentora is a role-based tutoring management platform supporting three distinct user types:
+Mentora is a **role-based tutoring management platform** supporting three distinct user types with carefully designed permissions and workflows:
 
 | Role | Capabilities |
 |---|---|
-| **PARENT** | Register students, browse and book lessons, track sessions via calendar |
-| **MENTOR** | Create lessons, schedule sessions, manage enrolled students |
-| **STUDENT** | View enrolled lessons and upcoming sessions |
+| **PARENT** | Register students under their account, browse available lessons, book students into lessons, track all sessions via calendar |
+| **MENTOR** | Create and manage lessons, schedule sessions for their lessons, view enrolled students and their progress |
+| **STUDENT** | View enrolled lessons, see upcoming sessions, access lesson materials |
 
-The platform includes an AI-powered assistant that summarizes text into structured bullet points using Google's Gemini LLM.
+### Key Capabilities
+
+- **Multi-tenant student management** — Parents manage multiple students independently; each student has separate authentication
+- **Flexible lesson enrollment** — Many-to-many relationship between students and lessons with duplicate prevention
+- **Session scheduling** — Mentors create time-bound sessions; all stakeholders view sessions via interactive calendar
+- **AI-powered summarization** — Google Gemini LLM integration for generating structured bullet-point summaries with rate limiting and error handling
+- **Production-ready deployment** — Complete CI/CD pipeline with automatic frontend deployments and containerized backend infrastructure
 
 ---
 
@@ -55,80 +65,174 @@ The platform includes an AI-powered assistant that summarizes text into structur
 
 ![Mentora Full Stack Architecture & Deployment](./Mentora_fullstack_deployment_architecture.png)
 
-The system is split into two independently deployed components:
+The system is split into **two independently deployed components**:
 
-- **Frontend** — a static React/Vite SPA deployed to Cloudflare's global CDN via Cloudflare Pages, triggered automatically on every push to the `main` branch of the GitHub repository.
-- **Backend** — a containerized Node.js/Express API running on an AWS EC2 instance, fronted by Nginx for SSL termination and reverse proxying.
+#### Frontend (Client-Side)
+- **Technology:** React 18 + TypeScript SPA built with Vite
+- **Hosting:** Cloudflare Pages (global CDN with 300+ edge locations)
+- **CI/CD:** Automatic deployment triggered on every push to `main` branch
+- **Domain:** `mentora-app.unnambhargav.in`
 
-DNS for both subdomains is managed through Cloudflare:
+#### Backend (Server-Side)
+- **Technology:** Node.js 20 + Express.js REST API
+- **Hosting:** AWS EC2 Ubuntu instance (t2.micro)
+- **Containerization:** Docker with PostgreSQL 16
+- **Reverse Proxy:** Nginx with Let's Encrypt SSL/TLS
+- **Domain:** `mentora-assignment-api.unnambhargav.in`
 
-| Subdomain | Points To |
-|---|---|
-| `mentora-app.unnambhargav.in` | Cloudflare Pages (global CDN) |
-| `mentora-assignment-api.unnambhargav.in` | AWS EC2 VM public IP |
+#### DNS Configuration
+Both subdomains are managed through Cloudflare DNS:
+
+| Subdomain | Type | Points To | SSL/TLS |
+|-----------|------|-----------|---------|
+| `mentora-app.unnambhargav.in` | CNAME | Cloudflare Pages | Cloudflare Universal SSL |
+| `mentora-assignment-api.unnambhargav.in` | A Record | AWS EC2 Public IP | Let's Encrypt (Certbot) |
+
+---
 
 ### Backend Architecture
 
 ![Mentora Backend Architecture](./Mentora_backend_architecture.png)
 
-The backend follows a **modular service-based structure**:
+The backend follows a **modular service-based architecture** with clear separation of concerns:
 
 ```
 Route → Controller → Service → Database
 ```
 
-| Layer | Responsibility |
-|---|---|
-| **Routes** | Define HTTP endpoints and attach middleware |
-| **Controllers** | Parse requests, call services, send responses |
-| **Services** | Contain business logic and execute database queries |
-| **Database** | Accessed through `config/db.js` via connection pool |
+| Layer | Responsibility | Examples |
+|-------|---------------|----------|
+| **Routes** | Define HTTP endpoints and attach middleware | `auth.routes.js`, `lessons.routes.js` |
+| **Controllers** | Parse requests, validate input, call services, format responses | `auth.controller.js`, `students.controller.js` |
+| **Services** | Business logic, ownership validation, database queries | `auth.service.js`, `bookings.service.js` |
+| **Middleware** | Cross-cutting concerns (auth, roles, errors, validation) | `auth.middleware.js`, `role.middleware.js` |
+| **Database** | PostgreSQL connection pool and query execution | `config/db.js` |
+
+**Benefits of this architecture:**
+- **Maintainability:** Each layer has a single responsibility
+- **Testability:** Services can be tested independently
+- **Reusability:** Business logic in services can be called from multiple controllers
+- **Security:** Middleware enforces authentication and authorization before business logic runs
+
+---
 
 ### Database Schema
 
 ![Simplified ER Diagram](./src/db/ER_Diagram_simplified.png)
 
-The schema is initialized using `create_schema.sql` in `src/db/`. This file is applied **once** after the database is created and before the server is started for the first time.
+The database schema consists of **five core tables** with referential integrity enforced through foreign keys:
+
+#### Tables Overview
+
+| Table | Purpose | Key Constraints |
+|-------|---------|----------------|
+| **users** | Parents and mentors | Unique username/email, role enum (PARENT/MENTOR) |
+| **students** | Student accounts managed by parents | Unique username, FK to parent via `parent_id` |
+| **lessons** | Courses created by mentors | FK to mentor via `mentor_id` |
+| **bookings** | Student enrollment in lessons | Composite unique constraint on (student_id, lesson_id) |
+| **sessions** | Time-bound lesson sessions | FK to lesson via `lesson_id` |
+
+#### Key Relationships
+
+```
+users (PARENT) --1:N--> students
+users (MENTOR) --1:N--> lessons
+students --N:M--> lessons (via bookings join table)
+lessons --1:N--> sessions
+```
+
+#### Schema Initialization
+
+The schema is defined in `src/db/Create_schema.sql` and must be applied **once** during initial setup:
+
+```bash
+psql -U root -d mentora -f src/db/Create_schema.sql
+```
+
+**Important:** The schema includes:
+- UUID primary keys for all tables
+- Cascade delete rules (deleting a parent removes their students)
+- Check constraints (role must be PARENT or MENTOR)
+- Unique constraints (prevent duplicate bookings)
+- Timestamp fields (created_at, updated_at)
 
 ---
 
 ## Tech Stack
 
 ### Frontend
-| Layer | Technology |
-|---|---|
-| UI Framework | React 18 + TypeScript |
-| Build Tool | Vite |
-| Routing | React Router v6 |
-| Data Fetching | TanStack Query (React Query) |
-| Styling | Tailwind CSS + shadcn/ui |
-| Animations | Framer Motion |
-| Hosting | Cloudflare Pages |
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| UI Framework | React 18 + TypeScript | Component-based UI with type safety |
+| Build Tool | Vite | Fast development and optimized production builds |
+| Routing | React Router v6 | Client-side navigation |
+| Data Fetching | TanStack Query (React Query) | Server state management with caching |
+| Styling | Tailwind CSS + shadcn/ui | Utility-first CSS with pre-built components |
+| Animations | Framer Motion | Smooth transitions and interactions |
+| Hosting | Cloudflare Pages | Global CDN with automatic deployments |
 
 ### Backend
-| Layer | Technology |
-|---|---|
-| Runtime | Node.js 20 |
-| Framework | Express.js |
-| Database | PostgreSQL 16 |
-| Auth | JWT (stateless) |
-| Validation | Zod |
-| LLM Integration | Google Gemini API |
-| Containerization | Docker |
-| Reverse Proxy | Nginx + Let's Encrypt SSL |
-| Hosting | AWS EC2 |
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Runtime | Node.js 20 | JavaScript runtime environment |
+| Framework | Express.js 5.x | Web application framework |
+| Database | PostgreSQL 16 | Relational database with ACID compliance |
+| Auth | JWT (jsonwebtoken) | Stateless authentication |
+| Validation | Zod | Runtime schema validation |
+| Password Hashing | bcryptjs | Secure password storage |
+| LLM Integration | Google Gemini API | AI-powered text summarization |
+| Containerization | Docker | Application containerization |
+| Reverse Proxy | Nginx + Let's Encrypt | SSL termination and load balancing |
+| Hosting | AWS EC2 | Ubuntu 22.04 LTS virtual machine |
 
 ---
 
 ## Features
 
-- **Role-based access control** — PARENT, MENTOR, and STUDENT roles with strictly enforced permissions at the middleware level
-- **Student management** — parents create and manage their own students independently of the users table
-- **Lesson booking** — many-to-many enrollment via a bookings join table with duplicate prevention
-- **Session scheduling** — mentors create sessions per lesson; all roles view sessions via an interactive calendar
-- **AI summarization** — authenticated users submit text and receive structured JSON bullet-point summaries powered by Gemini, with rate limiting and graceful error handling
-- **CI/CD pipeline** — frontend deploys automatically from GitHub to Cloudflare Pages on every push
-- **HTTPS everywhere** — Let's Encrypt certificates managed by Certbot on Nginx; Cloudflare handles TLS for the frontend
+### Core Features
+
+✅ **Role-based access control (RBAC)**
+- Three distinct user roles: PARENT, MENTOR, STUDENT
+- Middleware-enforced permissions on every protected endpoint
+- Role-specific dashboards and capabilities
+
+✅ **Multi-tenant student management**
+- Parents create and manage multiple student accounts
+- Students stored separately from users table
+- Each student has independent authentication credentials
+- Parent-student relationship enforced at database level
+
+✅ **Lesson marketplace**
+- Mentors create lessons with title and description
+- All authenticated users can browse available lessons
+- Mentors cannot enroll in their own lessons
+
+✅ **Booking system**
+- Parents book their students into lessons
+- Many-to-many relationship via join table
+- Duplicate enrollment prevention
+- Ownership validation (parent must own the student)
+
+✅ **Session scheduling**
+- Mentors create time-bound sessions for their lessons
+- Each session includes date, topic, and summary
+- Access control: only users associated with a lesson can view its sessions
+  - Mentors who created the lesson
+  - Parents whose students are enrolled
+  - Students enrolled in the lesson
+
+✅ **AI-powered summarization**
+- Google Gemini 2.5 Flash integration
+- Input validation (minimum 50 chars, maximum 10,000 chars)
+- Structured JSON output (3-6 bullet points, max 120 words)
+- Rate limiting (configurable, default 20 requests/minute)
+- Graceful error handling with appropriate HTTP status codes
+
+✅ **Production deployment**
+- Frontend: Cloudflare Pages with automatic CI/CD
+- Backend: Dockerized Node.js + PostgreSQL on AWS EC2
+- SSL/TLS encryption on all connections
+- Nginx reverse proxy for backend
 
 ---
 
@@ -136,62 +240,150 @@ The schema is initialized using `create_schema.sql` in `src/db/`. This file is a
 
 ### Frontend — Cloudflare Pages
 
-The frontend is deployed as a static site via Cloudflare Pages with automatic CI/CD:
+The frontend is deployed as a **static site** with automatic CI/CD:
 
-1. Developer pushes source code to GitHub (`main` branch)
-2. Cloudflare Pages detects the push via webhook
-3. Cloudflare runs `npm run build` (Vite), injecting all `VITE_` environment variables at build time
-4. The compiled `dist/` output is deployed globally across Cloudflare's CDN
-5. Live at `https://mentora-app.unnambhargav.in`
+#### Deployment Flow
 
-> **No `.env` file is committed to the repository.** All environment variables are configured directly in the Cloudflare Pages dashboard under Settings → Environment Variables.
+```
+Developer pushes to GitHub (main branch)
+          ↓
+Cloudflare webhook triggered
+          ↓
+Cloudflare runs: npm run build
+          ↓
+Vite bundles React app → dist/
+          ↓
+dist/ deployed to global CDN
+          ↓
+Live at: mentora-app.unnambhargav.in
+```
 
-**Build configuration:**
+#### Build Configuration
+
 | Setting | Value |
-|---|---|
+|---------|-------|
 | Framework preset | Vite |
 | Build command | `npm run build` |
 | Build output directory | `dist` |
 | Node version | 20 |
+| Root directory | `/` |
+
+#### Environment Variables
+
+All environment variables are configured in **Cloudflare Pages dashboard** (Settings → Environment Variables):
+
+```env
+VITE_API_BASE_URL=https://mentora-assignment-api.unnambhargav.in/api
+```
+
+> **Security Note:** `.env` files are **never committed** to the repository. Cloudflare injects environment variables at build time.
+
+#### Deployment Triggers
+
+- **Automatic:** Every push to `main` branch
+- **Manual:** Via Cloudflare dashboard
+
+**Deployment time:** Typically 2-3 minutes from push to live.
 
 ---
 
 ### Backend — AWS EC2 with Docker & Nginx
 
-The backend runs on an AWS EC2 Ubuntu instance with the following stack:
+The backend runs on an **AWS EC2 Ubuntu instance** with the following architecture:
 
 ```
-Internet
-  ↓ HTTPS :443
+Internet (HTTPS requests)
+        ↓
+    Port 443
+        ↓
 Nginx (SSL termination via Let's Encrypt)
-  ↓ HTTP :3000 (localhost only)
+        ↓
+    Port 3000 (localhost only)
+        ↓
 mentora_backend_container (Node.js/Express)
-  ↓ TCP :5432 (Docker bridge network)
+        ↓
+    Port 5432 (Docker bridge network)
+        ↓
 mentoraDB (PostgreSQL 16)
 ```
 
-**How it works:**
+#### Infrastructure Components
 
-- Nginx listens on port 443, terminates TLS using a Let's Encrypt certificate obtained via Certbot, and reverse proxies all traffic to the Node.js container on `localhost:3000`
-- The Node.js container and PostgreSQL container are both on a shared Docker bridge network (`mentoraBridge`), allowing them to communicate using container names as hostnames
-- Both containers run with `--restart unless-stopped` to survive VM reboots
-- The internal hop from Nginx to the container is plain HTTP over localhost — it never leaves the machine
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| EC2 Instance | AWS t2.micro (Ubuntu 22.04) | Virtual machine host |
+| Docker Network | Bridge network `mentoraBridge` | Container communication |
+| Database Container | `postgres:16` official image | Data persistence |
+| Backend Container | Custom Node.js 20 Alpine image | API server |
+| Reverse Proxy | Nginx | SSL termination, request routing |
+| SSL/TLS | Let's Encrypt (Certbot) | HTTPS encryption |
 
-**Nginx configuration (simplified):**
+#### Network Flow
+
+1. **Client → Nginx** (Port 443, HTTPS)
+   - Nginx listens on public IP
+   - SSL certificate from Let's Encrypt validates identity
+   - TLS encryption protects data in transit
+
+2. **Nginx → Backend Container** (Port 3000, HTTP over localhost)
+   - Nginx reverse proxies to `localhost:3000`
+   - Connection never leaves the machine
+   - Sets headers: `Host`, `X-Forwarded-Proto`
+
+3. **Backend → Database** (Port 5432, TCP over Docker network)
+   - Both containers on shared bridge network `mentoraBridge`
+   - Backend connects using container name: `mentoraDB`
+   - Isolated from host network
+
+#### Nginx Configuration
+
 ```nginx
 server {
-    listen 443 ssl;
+    listen 443 ssl http2;
     server_name mentora-assignment-api.unnambhargav.in;
 
+    # SSL certificates managed by Certbot
     ssl_certificate /etc/letsencrypt/live/mentora-assignment-api.unnambhargav.in/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/mentora-assignment-api.unnambhargav.in/privkey.pem;
+    
+    # SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers HIGH:!aNULL:!MD5;
 
+    # Reverse proxy to backend container
     location / {
         proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+
+# Redirect HTTP to HTTPS
+server {
+    listen 80;
+    server_name mentora-assignment-api.unnambhargav.in;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+#### Container Restart Policy
+
+Both containers use `--restart unless-stopped`:
+- Automatically restart on failure
+- Start on VM boot
+- Do not restart if manually stopped
+
+#### SSL Certificate Renewal
+
+Let's Encrypt certificates expire every 90 days. Certbot auto-renewal is configured via cron:
+
+```bash
+# Runs twice daily, renews if cert expires within 30 days
+0 */12 * * * certbot renew --quiet --post-hook "systemctl reload nginx"
 ```
 
 ---
@@ -199,117 +391,482 @@ server {
 ## Project Structure
 
 ```
-src/
-├── app.js              # Express middleware, routes, and global error handling
-├── server.js           # Entry point — starts server after verifying DB connectivity
-├── config/             # Environment variables and database connection pool
-├── routes/             # Endpoint definitions and middleware attachment
-├── controllers/        # HTTP request/response logic
-├── services/           # Business logic and database queries
-├── validators/         # Zod request validation schemas
-├── middleware/         # Auth, role checks, error handling, 404
-├── utils/              # Shared helper utilities
-└── db/
-    └── create_schema.sql  # Database schema — applied once on first setup
+mentora-backend/
+├── src/
+│   ├── app.js                  # Express app setup, middleware, routes
+│   ├── server.js               # Entry point, DB connection, server start
+│   ├── config/
+│   │   ├── db.js              # PostgreSQL connection pool
+│   │   └── env.js             # Environment variable validation
+│   ├── routes/
+│   │   ├── index.js           # Main router, combines all routes
+│   │   ├── auth.routes.js     # Authentication endpoints
+│   │   ├── students.routes.js # Student management
+│   │   ├── lessons.routes.js  # Lesson CRUD operations
+│   │   ├── bookings.routes.js # Enrollment system
+│   │   ├── sessions.routes.js # Session scheduling
+│   │   └── llm.routes.js      # AI summarization
+│   ├── controllers/
+│   │   ├── auth.controller.js    # Signup, login, get current user
+│   │   ├── students.controller.js # Create student, list students
+│   │   ├── lessons.controller.js  # Create/list lessons
+│   │   ├── bookings.controller.js # Enroll students
+│   │   ├── sessions.controller.js # Schedule sessions
+│   │   └── llm.controller.js      # Summarize text
+│   ├── services/
+│   │   ├── auth.service.js       # User auth logic, JWT generation
+│   │   ├── students.service.js   # Student CRUD, ownership checks
+│   │   ├── lessons.service.js    # Lesson operations
+│   │   ├── bookings.service.js   # Enrollment logic, duplicate prevention
+│   │   ├── sessions.service.js   # Session CRUD, access control
+│   │   └── llm.service.js        # Gemini API integration
+│   ├── validators/
+│   │   ├── auth.validator.js     # Signup/login schemas
+│   │   ├── students.validator.js # Student creation schema
+│   │   ├── lessons.validator.js  # Lesson creation schema
+│   │   ├── bookings.validator.js # Booking schema (snake_case/camelCase)
+│   │   └── sessions.validator.js # Session schema (snake_case/camelCase)
+│   ├── middleware/
+│   │   ├── auth.middleware.js    # JWT verification, req.user attachment
+│   │   ├── role.middleware.js    # Role-based access control
+│   │   ├── error.middleware.js   # Global error handler, Zod errors
+│   │   └── notFound.middleware.js # 404 handler
+│   ├── utils/
+│   │   └── jwt.util.js           # JWT helper functions
+│   └── db/
+│       └── Create_schema.sql     # Database schema (run once)
+├── tests/
+│   └── validators.test.js        # Validator tests (snake_case/camelCase)
+├── .env.example                  # Environment variable template
+├── .dockerignore                 # Excludes .env, node_modules from builds
+├── .gitignore                    # Git ignore rules
+├── Dockerfile                    # Multi-stage Docker build
+├── package.json                  # Dependencies and scripts
+├── package-lock.json             # Locked dependency versions
+└── README.md                     # This file
 ```
 
 ---
 
 ## Request Flow
 
+Every API request follows this flow:
+
 ```
-Client
-  │
-  ▼
-Route          ← Defines the endpoint and attaches middleware
-  │
-  ▼
-Middleware     ← JWT verification, role checks, Zod validation
-  │
-  ▼
-Controller     ← Parses request, delegates to service, sends response
-  │
-  ▼
-Service        ← Business logic, ownership checks, DB queries
-  │
-  ▼
-Database       ← PostgreSQL via config/db.js
+1. Client sends HTTP request
+          ↓
+2. Route matches endpoint
+   Example: POST /api/bookings
+          ↓
+3. Middleware chain executes in order:
+   a. auth.middleware.js
+      - Verifies JWT token
+      - Attaches user to req.user
+      - Returns 401 if invalid
+   b. role.middleware.js (if present)
+      - Checks if user.role matches required role
+      - Returns 403 if unauthorized
+   c. Zod validator (if present)
+      - Validates request body against schema
+      - Returns 400 if invalid
+          ↓
+4. Controller receives validated request
+   - Extracts data from req.body, req.params, req.user
+   - Calls appropriate service function
+          ↓
+5. Service executes business logic
+   - Validates ownership (e.g., parent owns student)
+   - Performs database queries
+   - Returns data or throws error
+          ↓
+6. Controller formats response
+   - Returns JSON with appropriate status code
+   - 200/201 for success
+   - 400/403/404/409/500 for errors
+          ↓
+7. Error middleware catches any errors
+   - Formats error as { message: "..." }
+   - Returns appropriate HTTP status code
+          ↓
+8. Response sent to client
+```
+
+### Example: Creating a Booking
+
+```javascript
+// Client request
+POST /api/bookings
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+{
+  "student_id": "123e4567-e89b-12d3-a456-426614174000",
+  "lesson_id": "987fcdeb-51a2-43f1-b789-012345678901"
+}
+
+// Flow:
+1. Route: POST /bookings → bookings.routes.js
+2. Middleware:
+   - auth.middleware → Verifies JWT, sets req.user
+   - role.middleware → Checks req.user.role === 'PARENT'
+   - Zod validator → Validates student_id and lesson_id are UUIDs
+3. Controller: bookings.controller.createBooking()
+   - Extracts: student_id, lesson_id, parent_id from req
+4. Service: bookings.service.createBooking()
+   - Validates parent owns student
+   - Checks lesson exists
+   - Prevents duplicate enrollment
+   - Inserts into bookings table
+5. Response: 201 Created
+{
+  "id": "abcd1234-...",
+  "student_id": "123e4567-...",
+  "lesson_id": "987fcdeb-...",
+  "created_at": "2026-03-09T12:00:00.000Z"
+}
 ```
 
 ---
 
 ## Design Decisions
 
-### Students stored separately from users
+### 1. Students Stored Separately from Users
 
-Students live in a dedicated `students` table rather than in `users`.
+**Decision:** Students live in a dedicated `students` table, not in `users`.
 
-- Students authenticate independently
-- A single parent may manage multiple students
-- Students follow a different permission model from parents and mentors
-- Prevents mixing authentication roles with managed accounts
+**Rationale:**
+- **Separation of concerns:** Users authenticate and have roles; students are managed entities
+- **Multi-tenant support:** A single parent can manage multiple students
+- **Independent authentication:** Students log in separately with their own credentials
+- **Different permission model:** Students have read-only access; parents/mentors have write access
+- **Clearer domain model:** Users create accounts; parents create students under those accounts
 
-This separation enables cleaner authorization and clearer domain modeling.
+**Alternative considered:** Store students as users with role='STUDENT' and add parent_id to users table.
 
-### JWT for stateless authentication
+**Why rejected:** Mixing authentication accounts with managed entities creates confusion. If a student later becomes a parent, migration becomes complex.
 
-- No server-side session storage required
-- Horizontally scalable across multiple instances
-- Token carries user identity and role
-- Simple integration with any API client
+---
 
-Tokens are passed via:
+### 2. JWT for Stateless Authentication
+
+**Decision:** Use JWT tokens instead of session-based authentication.
+
+**Rationale:**
+- **Scalability:** No server-side session storage required; can horizontally scale across multiple instances
+- **Stateless:** Each request is self-contained; no need to look up session in database
+- **Simple client integration:** Token passed in Authorization header; works with any HTTP client
+- **Microservices-ready:** Token can be validated by any service without shared session store
+
+**Security considerations:**
+- Tokens are signed with `JWT_SECRET` (256-bit random key)
+- Tokens expire after 24 hours (configurable via `JWT_EXPIRES_IN`)
+- No refresh token mechanism (for simplicity; users re-login after expiry)
+
+**Alternative considered:** Express-session with PostgreSQL session store.
+
+**Why rejected:** Adds database overhead on every request and complicates horizontal scaling.
+
+---
+
+### 3. Thin Controllers, Rich Services
+
+**Decision:** Controllers only parse requests and format responses; all business logic lives in services.
+
+**Rationale:**
+- **Single Responsibility Principle:** Controllers handle HTTP; services handle business logic
+- **Testability:** Services can be unit tested without HTTP mocking
+- **Reusability:** Same service function can be called from multiple controllers or background jobs
+- **Maintainability:** Business rules are centralized in one place
+
+**Example:**
+
+```javascript
+// Controller (thin)
+async createBooking(req, res, next) {
+  try {
+    const { student_id, lesson_id } = req.body;
+    const parent_id = req.user.id;
+    
+    const booking = await bookingsService.createBooking(student_id, lesson_id, parent_id);
+    
+    res.status(201).json(booking);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Service (rich)
+async createBooking(studentId, lessonId, parentId) {
+  // 1. Validate parent owns student
+  const student = await db.query('SELECT * FROM students WHERE id = $1', [studentId]);
+  if (!student || student.parent_id !== parentId) {
+    throw new Error('Student not found or not owned by parent');
+  }
+  
+  // 2. Check lesson exists
+  const lesson = await db.query('SELECT * FROM lessons WHERE id = $1', [lessonId]);
+  if (!lesson) {
+    throw new Error('Lesson not found');
+  }
+  
+  // 3. Prevent duplicate enrollment
+  const existing = await db.query(
+    'SELECT * FROM bookings WHERE student_id = $1 AND lesson_id = $2',
+    [studentId, lessonId]
+  );
+  if (existing) {
+    throw new Error('Student already enrolled in this lesson');
+  }
+  
+  // 4. Create booking
+  return await db.query(
+    'INSERT INTO bookings (student_id, lesson_id) VALUES ($1, $2) RETURNING *',
+    [studentId, lessonId]
+  );
+}
 ```
-Authorization: Bearer <JWT_TOKEN>
+
+---
+
+### 4. Bookings as a Join Table
+
+**Decision:** Use a `bookings` table to link students and lessons (many-to-many).
+
+**Rationale:**
+- **Proper relational modeling:** Students can enroll in multiple lessons; lessons can have multiple students
+- **Referential integrity:** Foreign keys ensure students and lessons exist
+- **Duplicate prevention:** Unique constraint on (student_id, lesson_id) prevents double enrollment
+- **Efficient queries:** Can easily get all lessons for a student or all students for a lesson
+- **Extensible:** Can add fields like enrollment_date, status, payment_info without changing other tables
+
+**Schema:**
+
+```sql
+CREATE TABLE bookings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    lesson_id UUID NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(student_id, lesson_id)  -- Prevents duplicate enrollments
+);
 ```
 
-### Thin controllers, rich services
+**Alternative considered:** Store enrolled_students as JSON array in lessons table.
 
-Controllers handle only request parsing and response sending. All business rules, ownership validation, and database operations live in the service layer — improving maintainability, testability, and reuse across endpoints.
+**Why rejected:** Violates normalization; loses referential integrity; inefficient queries.
 
-### Bookings as a join table
+---
 
-Students link to lessons through a `bookings` table, providing:
-- A proper many-to-many relationship
-- Database-level referential integrity
-- A unique constraint preventing duplicate enrollments
-- Efficient querying and aggregation
+### 5. Summary vs. Detail Endpoints
 
-### Summary vs. detail endpoints
+**Decision:** Provide separate endpoints for summary views and detailed data.
 
-| Endpoint | Returns |
-|---|---|
-| `GET /mentor/lessons` | Summary view with student and session counts |
-| `GET /lessons/:lessonId/students` | Full enrolled student list |
-| `GET /lessons/:id/sessions` | Full session list |
+**Rationale:**
+- **Performance:** Summary endpoints return minimal data; detail endpoints return full data
+- **Flexibility:** Clients can choose appropriate endpoint based on use case
+- **Bandwidth optimization:** Mobile apps can fetch summaries; desktop apps can fetch details
+
+**Examples:**
+
+| Endpoint | Returns | Use Case |
+|----------|---------|----------|
+| `GET /mentor/lessons` | Lesson list with student_count and session_count | Mentor dashboard |
+| `GET /lessons/:id/students` | Full student details (name, username, enrollment date) | Student management page |
+| `GET /lessons/:id/sessions` | All session details (date, topic, summary) | Session calendar |
 
 ---
 
 ## Authentication & Authorization
 
-### Middleware
+### Middleware Stack
 
-| Middleware | Purpose |
-|---|---|
-| `auth.middleware.js` | Verifies JWT and attaches the authenticated user to `req.user` |
-| `role.middleware.js` | Restricts endpoints based on user role |
-| `error.middleware.js` | Centralized error handling |
-| `notFound.middleware.js` | Handles unknown routes |
+| Middleware | File | Purpose |
+|-----------|------|---------|
+| `auth.middleware.js` | Global auth check | Verifies JWT, attaches `req.user` |
+| `role.middleware.js` | Role enforcement | Restricts endpoints by user role |
+| `error.middleware.js` | Error handler | Catches and formats all errors |
+| `notFound.middleware.js` | 404 handler | Handles unknown routes |
 
-### Roles
+---
+
+### Authentication Flow
+
+#### 1. Signup (POST /auth/signup)
 
 ```
-PARENT | MENTOR | STUDENT
+Client → Server
+{
+  "first_name": "John",
+  "last_name": "Doe",
+  "email": "john@example.com",
+  "phone": "9876543210",
+  "role": "PARENT",
+  "username": "john_parent",
+  "password": "strongpassword"
+}
+
+Server validates:
+- All fields present
+- Email format valid
+- Role is PARENT or MENTOR (not STUDENT)
+- Username not already taken
+
+Server hashes password:
+- Uses bcryptjs with salt rounds 10
+- Stores hash, never plaintext
+
+Server creates user:
+INSERT INTO users (first_name, last_name, email, phone, role, username, password_hash)
+VALUES (...)
+
+Server responds:
+201 Created
+{
+  "id": "uuid",
+  "username": "john_parent",
+  "role": "PARENT"
+}
 ```
 
-### Access Rules
+#### 2. Login (POST /auth/login)
 
-| Role | Permissions |
-|---|---|
-| **PARENT** | Create and manage their own students; book lessons only for their own students |
-| **MENTOR** | Create and manage their own lessons; create sessions; view enrolled students |
-| **STUDENT** | View only their own lessons |
-| **Authenticated** | View sessions for any lesson they are associated with |
+```
+Client → Server
+{
+  "username": "john_parent",
+  "password": "strongpassword"
+}
+
+Server validates:
+- Finds user by username
+- Compares password hash using bcrypt.compare()
+
+Server generates JWT:
+const token = jwt.sign(
+  { id: user.id, role: user.role, type: 'user' },
+  process.env.JWT_SECRET,
+  { expiresIn: process.env.JWT_EXPIRES_IN }
+);
+
+Server responds:
+200 OK
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "uuid",
+    "role": "PARENT",
+    "username": "john_parent"
+  }
+}
+```
+
+#### 3. Authenticated Request
+
+```
+Client → Server
+GET /api/students
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+auth.middleware.js:
+1. Extracts token from Authorization header
+2. Verifies token signature using JWT_SECRET
+3. Checks token expiration
+4. Decodes payload: { id, role, type }
+5. Attaches to request: req.user = { id, role, type }
+
+If valid: next() → proceed to controller
+If invalid: 401 Unauthorized
+
+role.middleware.js (if present):
+1. Checks req.user.role against required roles
+2. If match: next()
+3. If no match: 403 Forbidden
+```
+
+---
+
+### Authorization Rules
+
+| Role | Can Create | Can Read | Can Update | Can Delete |
+|------|-----------|----------|-----------|-----------|
+| **PARENT** | Own students, bookings for own students | Own students, all lessons, enrolled lessons | Own students | Own students |
+| **MENTOR** | Own lessons, sessions for own lessons | Own lessons, enrolled students, all lessons | Own lessons, own sessions | Own lessons, own sessions |
+| **STUDENT** | Nothing | Own enrolled lessons, sessions for enrolled lessons | Nothing | Nothing |
+
+---
+
+### Role-Based Endpoint Protection
+
+```javascript
+// Public endpoints (no auth required)
+router.post('/auth/signup', authController.signup);
+router.post('/auth/login', authController.login);
+router.get('/health', (req, res) => res.send('OK'));
+
+// Authenticated endpoints (any logged-in user)
+router.get('/me', auth, authController.getCurrentUser);
+router.get('/lessons', auth, lessonsController.getAllLessons);
+
+// Parent-only endpoints
+router.post('/students', auth, role('PARENT'), studentsController.createStudent);
+router.post('/bookings', auth, role('PARENT'), bookingsController.createBooking);
+
+// Mentor-only endpoints
+router.post('/lessons', auth, role('MENTOR'), lessonsController.createLesson);
+router.post('/sessions', auth, role('MENTOR'), sessionsController.createSession);
+
+// Multi-role endpoints
+router.get('/students/:id/lessons', auth, role('PARENT', 'STUDENT'), studentsController.getStudentLessons);
+```
+
+---
+
+### Access Control for Sessions
+
+**Requirement:** Only users associated with a lesson can view its sessions.
+
+**Implementation:** `sessions.service.js` validates access before returning sessions:
+
+```javascript
+async getSessionsByLesson(lessonId, userId, userRole, userType) {
+  // 1. Check if user has access to this lesson
+  let hasAccess = false;
+  
+  if (userType === 'user' && userRole === 'MENTOR') {
+    // Mentors can view sessions for their own lessons
+    const lesson = await db.query(
+      'SELECT * FROM lessons WHERE id = $1 AND mentor_id = $2',
+      [lessonId, userId]
+    );
+    hasAccess = !!lesson;
+  } else if (userType === 'user' && userRole === 'PARENT') {
+    // Parents can view sessions if they have a student enrolled
+    const enrollment = await db.query(
+      'SELECT b.* FROM bookings b ' +
+      'JOIN students s ON b.student_id = s.id ' +
+      'WHERE b.lesson_id = $1 AND s.parent_id = $2',
+      [lessonId, userId]
+    );
+    hasAccess = !!enrollment;
+  } else if (userType === 'student') {
+    // Students can view sessions if they are enrolled
+    const enrollment = await db.query(
+      'SELECT * FROM bookings WHERE lesson_id = $1 AND student_id = $2',
+      [lessonId, userId]
+    );
+    hasAccess = !!enrollment;
+  }
+  
+  if (!hasAccess) {
+    throw new Error('Access denied');
+  }
+  
+  // 2. Return sessions for this lesson
+  return await db.query(
+    'SELECT * FROM sessions WHERE lesson_id = $1 ORDER BY date ASC',
+    [lessonId]
+  );
+}
+```
 
 ---
 
@@ -317,80 +874,409 @@ PARENT | MENTOR | STUDENT
 
 All incoming requests are validated using **Zod schemas** defined in `src/validators/`.
 
-Validation runs **before business logic executes**, ensuring invalid or malformed data never reaches the service layer.
+### Validation Flow
+
+```
+1. Client sends request
+          ↓
+2. Zod validator middleware runs
+   - Parses req.body against schema
+   - Returns 400 if validation fails
+          ↓
+3. Controller receives validated data
+   - Type-safe (TypeScript benefits from Zod inference)
+```
+
+### Example: Booking Validation
+
+```javascript
+// src/validators/bookings.validator.js
+const { z } = require('zod');
+
+const createBookingSchema = z.object({
+  student_id: z.string().uuid().optional(),
+  studentId: z.string().uuid().optional(),
+  lesson_id: z.string().uuid().optional(),
+  lessonId: z.string().uuid().optional()
+}).refine(
+  (data) => (data.student_id || data.studentId) && (data.lesson_id || data.lessonId),
+  { message: 'student_id and lesson_id are required' }
+);
+
+// Middleware usage
+router.post('/bookings', 
+  auth, 
+  role('PARENT'), 
+  validate(createBookingSchema),  // Zod validation
+  bookingsController.createBooking
+);
+```
+
+### Validation Error Response
+
+```json
+// Client sends invalid data
+POST /api/bookings
+{
+  "student_id": "not-a-uuid",
+  "lesson_id": "123"
+}
+
+// Server responds
+400 Bad Request
+{
+  "message": "Validation failed: student_id must be a valid UUID"
+}
+```
+
+---
+
+### Input Format Flexibility
+
+The API accepts **both `snake_case` and `camelCase`** for input fields to support different client preferences:
+
+**Both formats are valid:**
+
+```json
+// snake_case (Python, Ruby style)
+{
+  "student_id": "123e4567-e89b-12d3-a456-426614174000",
+  "lesson_id": "987fcdeb-51a2-43f1-b789-012345678901"
+}
+
+// camelCase (JavaScript style)
+{
+  "studentId": "123e4567-e89b-12d3-a456-426614174000",
+  "lessonId": "987fcdeb-51a2-43f1-b789-012345678901"
+}
+```
+
+**Applies to:**
+- POST /bookings (student_id, lesson_id)
+- POST /sessions (lesson_id)
+- Any endpoint accepting ID parameters
+
+**Implementation:**
+
+```javascript
+// Zod schema accepts both formats
+const schema = z.object({
+  student_id: z.string().uuid().optional(),
+  studentId: z.string().uuid().optional(),
+}).refine(
+  (data) => data.student_id || data.studentId,
+  { message: 'student_id or studentId is required' }
+);
+
+// Service normalizes to snake_case
+const studentId = req.body.student_id || req.body.studentId;
+```
+
+**Why support both?**
+- JavaScript clients prefer camelCase
+- Database uses snake_case
+- Improved developer experience
+- No breaking changes when migrating between styles
 
 ---
 
 ## Error Handling
 
-All errors are returned in a consistent JSON structure:
+All errors are returned in a **consistent JSON format**:
 
 ```json
 {
-  "message": "Error description"
+  "message": "Human-readable error description"
 }
 ```
 
 ### HTTP Status Codes
 
-| Code | Meaning |
-|---|---|
-| 200 | Successful request |
-| 201 | Resource created |
-| 400 | Validation error |
-| 401 | Authentication required |
-| 403 | Forbidden |
-| 404 | Resource not found |
-| 409 | Conflict |
-| 413 | Payload too large |
-| 429 | Rate limit exceeded |
-| 500 | Internal server error |
-| 502 | External provider error |
+| Code | Meaning | Example |
+|------|---------|---------|
+| **200** | OK | Successful GET request |
+| **201** | Created | Resource successfully created |
+| **400** | Bad Request | Validation error, missing required field |
+| **401** | Unauthorized | Missing or invalid JWT token |
+| **403** | Forbidden | Valid token but insufficient permissions |
+| **404** | Not Found | Resource does not exist |
+| **409** | Conflict | Duplicate entry (username taken, student already enrolled) |
+| **413** | Payload Too Large | Request body exceeds size limit (LLM text too long) |
+| **429** | Too Many Requests | Rate limit exceeded |
+| **500** | Internal Server Error | Unexpected server error |
+| **502** | Bad Gateway | External service error (Gemini API failure) |
+
+---
+
+### Error Scenarios and Responses
+
+#### 1. Validation Error (400)
+
+```bash
+# Missing required field
+POST /api/auth/signup
+{
+  "username": "john"
+  # Missing password, email, etc.
+}
+
+# Response
+400 Bad Request
+{
+  "message": "Validation failed: password is required"
+}
+```
+
+#### 2. Authentication Error (401)
+
+```bash
+# Missing token
+GET /api/students
+
+# Response
+401 Unauthorized
+{
+  "message": "Authentication required"
+}
+
+# Invalid token
+GET /api/students
+Authorization: Bearer invalid_token
+
+# Response
+401 Unauthorized
+{
+  "message": "Invalid token"
+}
+
+# Expired token
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... (expired)
+
+# Response
+401 Unauthorized
+{
+  "message": "Token expired"
+}
+```
+
+#### 3. Authorization Error (403)
+
+```bash
+# Student tries to create a lesson (MENTOR only)
+POST /api/lessons
+Authorization: Bearer <student_token>
+
+# Response
+403 Forbidden
+{
+  "message": "Access denied: MENTOR role required"
+}
+
+# Parent tries to book another parent's student
+POST /api/bookings
+{
+  "student_id": "someone_elses_student",
+  "lesson_id": "..."
+}
+
+# Response
+403 Forbidden
+{
+  "message": "Access denied: you do not own this student"
+}
+```
+
+#### 4. Not Found (404)
+
+```bash
+# Resource doesn't exist
+GET /api/lessons/00000000-0000-0000-0000-000000000000
+
+# Response
+404 Not Found
+{
+  "message": "Lesson not found"
+}
+```
+
+#### 5. Conflict (409)
+
+```bash
+# Username already taken
+POST /api/auth/signup
+{
+  "username": "existing_user",
+  ...
+}
+
+# Response
+409 Conflict
+{
+  "message": "Username already exists"
+}
+
+# Student already enrolled
+POST /api/bookings
+{
+  "student_id": "already_enrolled_student",
+  "lesson_id": "lesson_id"
+}
+
+# Response
+409 Conflict
+{
+  "message": "Student already enrolled in this lesson"
+}
+```
+
+#### 6. Payload Too Large (413)
+
+```bash
+# Text exceeds 10,000 characters
+POST /api/llm/summarize
+{
+  "text": "Very long text..." (>10000 chars)
+}
+
+# Response
+413 Payload Too Large
+{
+  "message": "Text exceeds maximum length of 10000 characters"
+}
+```
+
+#### 7. Rate Limit Exceeded (429)
+
+```bash
+# More than 20 requests per minute to LLM endpoint
+POST /api/llm/summarize (21st request within 60 seconds)
+
+# Response
+429 Too Many Requests
+{
+  "message": "Rate limit exceeded. Try again in 60 seconds."
+}
+```
+
+#### 8. Internal Server Error (500)
+
+```bash
+# Unexpected error (database connection lost, etc.)
+GET /api/lessons
+
+# Response
+500 Internal Server Error
+{
+  "message": "An unexpected error occurred"
+}
+```
+
+#### 9. External Service Error (502)
+
+```bash
+# Gemini API is down or returns error
+POST /api/llm/summarize
+{
+  "text": "Valid text..."
+}
+
+# Response
+502 Bad Gateway
+{
+  "message": "Failed to generate summary. Please try again later."
+}
+```
+
+---
+
+### Error Middleware Implementation
+
+```javascript
+// src/middleware/error.middleware.js
+const errorHandler = (err, req, res, next) => {
+  console.error(err);
+  
+  // Zod validation errors → 400
+  if (err.name === 'ZodError') {
+    return res.status(400).json({
+      message: `Validation failed: ${err.errors[0].message}`
+    });
+  }
+  
+  // JWT errors → 401
+  if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+    return res.status(401).json({
+      message: 'Invalid or expired token'
+    });
+  }
+  
+  // Custom error with status code
+  if (err.statusCode) {
+    return res.status(err.statusCode).json({
+      message: err.message
+    });
+  }
+  
+  // Generic server error → 500
+  res.status(500).json({
+    message: 'An unexpected error occurred'
+  });
+};
+```
 
 ---
 
 ## API Reference
 
-**Base URL (Live):** `https://mentora-assignment-api.unnambhargav.in/api`
+**Base URL (Live):** `https://mentora-assignment-api.unnambhargav.in/api`  
+**Base URL (Local):** `http://localhost:3000/api`
 
 All endpoints are relative to `/api`.
+
+---
 
 ### Core Endpoints
 
 | Method | Endpoint | Auth | Roles | Description |
-|---|---|---|---|---|
-| GET | `/health` | No | — | Health check |
-| POST | `/auth/signup` | No | — | Register a parent or mentor |
-| POST | `/auth/login` | No | — | Login and receive a JWT token |
-| GET | `/auth/me` | Yes | Any | Return authenticated account |
-| POST | `/students` | Yes | PARENT | Create a student |
+|--------|----------|------|-------|-------------|
+| GET | `/health` | No | — | Health check (returns "OK") |
+| POST | `/auth/signup` | No | — | Register a parent or mentor account |
+| POST | `/auth/login` | No | — | Login and receive JWT token |
+| GET | `/me` or `/auth/me` | Yes | Any | Get current authenticated user |
+| POST | `/students` | Yes | PARENT | Create a student account |
 | GET | `/students` | Yes | PARENT | List parent's students |
-| POST | `/lessons` | Yes | MENTOR | Create a lesson |
-| POST | `/bookings` | Yes | PARENT | Book a student into a lesson |
+| POST | `/lessons` | Yes | MENTOR | Create a new lesson |
+| POST | `/bookings` | Yes | PARENT | Enroll a student in a lesson |
 | POST | `/sessions` | Yes | MENTOR | Create a lesson session |
-| GET | `/lessons/:id/sessions` | Yes | Any | List sessions for a lesson |
+| GET | `/lessons/:id/sessions` | Yes | Any* | List sessions for a lesson |
+
+*Access restricted to users associated with the lesson (mentor who created it, parents/students enrolled)
+
+---
 
 ### Extended Endpoints
 
 | Method | Endpoint | Auth | Roles | Description |
-|---|---|---|---|---|
-| GET | `/lessons` | Yes | Any | List all lessons |
-| GET | `/students/:studentId/lessons` | Yes | PARENT, STUDENT | Lessons assigned to a student |
-| GET | `/lessons/:lessonId/students` | Yes | MENTOR | Students enrolled in a lesson |
-| GET | `/parent/students` | Yes | PARENT | Parent dashboard |
+|--------|----------|------|-------|-------------|
+| GET | `/lessons` | Yes | Any | List all available lessons |
+| GET | `/students/:studentId/lessons` | Yes | PARENT, STUDENT | Get lessons for a specific student |
+| GET | `/lessons/:lessonId/students` | Yes | MENTOR | Get students enrolled in a lesson |
+| GET | `/parent/students` | Yes | PARENT | Parent dashboard (students summary) |
 | GET | `/parent/students/:studentId/lessons` | Yes | PARENT | Lessons for a specific child |
-| GET | `/mentor/lessons` | Yes | MENTOR | Mentor lesson dashboard with counts |
+| GET | `/mentor/lessons` | Yes | MENTOR | Mentor dashboard (lessons with counts) |
+
+---
 
 ### AI Summarization Endpoint
 
 | Method | Endpoint | Auth | Roles | Description |
-|---|---|---|---|---|
-| POST | `/llm/summarize` | Yes | Any authenticated | Generate a structured text summary |
+|--------|----------|------|-------|-------------|
+| POST | `/llm/summarize` | Yes | Any authenticated | Generate structured text summary |
 
-**Request body:**
+**Request:**
 ```json
 {
-  "text": "Your long-form text to be summarized goes here."
+  "text": "Your long-form text to be summarized goes here. Must be at least 50 characters and no more than 10,000 characters."
 }
 ```
 
@@ -402,41 +1288,71 @@ All endpoints are relative to `/api`.
 }
 ```
 
-**Error codes:**
+**Validation Rules:**
+- Text field is required
+- Minimum length: 50 characters
+- Maximum length: 10,000 characters
 
-| Condition | Code |
-|---|---|
-| `text` field missing | 400 |
-| `text` below minimum length | 400 |
-| `text` exceeds maximum length | 413 |
-| Rate limit exceeded | 429 |
-| LLM provider error | 502 |
+**Error Codes:**
 
-**Rate limiting:** Protected by a sliding window rate limiter configured via `LLM_RATE_LIMIT_WINDOW_MS` and `LLM_RATE_LIMIT_MAX_REQUESTS`.
+| Condition | HTTP Code | Response |
+|-----------|-----------|----------|
+| Text missing or empty | 400 | `{ "message": "Text is required" }` |
+| Text too short (<50 chars) | 400 | `{ "message": "Text must be at least 50 characters" }` |
+| Text too long (>10,000 chars) | 413 | `{ "message": "Text exceeds maximum length of 10000 characters" }` |
+| Rate limit exceeded | 429 | `{ "message": "Rate limit exceeded. Try again in X seconds." }` |
+| Gemini API failure | 502 | `{ "message": "Failed to generate summary. Please try again later." }` |
+
+**Rate Limiting:**
+- Window: 60 seconds (configurable via `LLM_RATE_LIMIT_WINDOW_MS`)
+- Max requests: 20 per window (configurable via `LLM_RATE_LIMIT_MAX_REQUESTS`)
+- Applies per IP address
+
+**Summary Format:**
+- 3-6 bullet points
+- Each bullet <25 words
+- Total word count <120 words
+- Returns structured JSON (not prose)
 
 ---
 
 ## API Usage Guide
 
+### Setup
+
 ```bash
+# Set base URL
 export BASE_URL="https://mentora-assignment-api.unnambhargav.in/api"
-export TOKEN="<your-jwt-token>"
+
+# For local development
+# export BASE_URL="http://localhost:3000/api"
+
+# Token will be set after login
+export TOKEN=""
 ```
 
 ---
 
-### Health Check
+### 1. Health Check
+
+**Purpose:** Verify API is running
 
 ```bash
 curl "$BASE_URL/health"
 ```
-Expected: `OK`
+
+**Expected Response:**
+```
+OK
+```
 
 ---
 
-### Signup
+### 2. Signup (Create Account)
 
-Creates a **PARENT** or **MENTOR** account. Students are not created through signup.
+**Purpose:** Register a new PARENT or MENTOR account
+
+**Note:** Students are NOT created via signup. Parents create students after logging in.
 
 ```bash
 curl -X POST "$BASE_URL/auth/signup" \
@@ -448,53 +1364,107 @@ curl -X POST "$BASE_URL/auth/signup" \
     "phone": "9876543210",
     "role": "PARENT",
     "username": "john_parent",
-    "password": "strongpassword"
+    "password": "strongpassword123"
   }'
 ```
 
-| Code | Meaning |
-|---|---|
-| 201 | Account created |
-| 400 | Validation error |
-| 409 | Username already exists |
+**Response (201 Created):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john_parent",
+  "first_name": "John",
+  "last_name": "Doe",
+  "email": "john@example.com",
+  "phone": "9876543210",
+  "role": "PARENT",
+  "created_at": "2026-03-09T10:00:00.000Z"
+}
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 400 | Missing required field, invalid email format |
+| 409 | Username or email already exists |
 
 ---
 
-### Login
+### 3. Login
+
+**Purpose:** Authenticate and receive JWT token
 
 ```bash
 curl -X POST "$BASE_URL/auth/login" \
   -H "Content-Type: application/json" \
   -d '{
     "username": "john_parent",
-    "password": "strongpassword"
+    "password": "strongpassword123"
   }'
 ```
 
-**Response:**
+**Response (200 OK):**
 ```json
 {
-  "token": "<JWT_TOKEN>"
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU1MGU4NDAwLWUyOWItNDFkNC1hNzE2LTQ0NjY1NTQ0MDAwMCIsInJvbGUiOiJQQVJFTlQiLCJ0eXBlIjoidXNlciIsImlhdCI6MTcwOTk3NjAwMCwiZXhwIjoxNzEwMDYyNDAwfQ.xyz123...",
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "username": "john_parent",
+    "role": "PARENT",
+    "first_name": "John",
+    "last_name": "Doe"
+  }
 }
 ```
 
-Save the token:
+**Save token for subsequent requests:**
 ```bash
-export TOKEN="<JWT_TOKEN>"
+export TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 400 | Missing username or password |
+| 401 | Invalid credentials |
 
 ---
 
-### Get Current User
+### 4. Get Current User
+
+**Purpose:** Retrieve authenticated user's profile
 
 ```bash
-curl "$BASE_URL/auth/me" \
+curl "$BASE_URL/me" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+**Response (200 OK):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john_parent",
+  "first_name": "John",
+  "last_name": "Doe",
+  "email": "john@example.com",
+  "phone": "9876543210",
+  "role": "PARENT"
+}
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 401 | Missing or invalid token |
+
 ---
 
-### Create Student *(PARENT only)*
+### 5. Create Student (PARENT only)
+
+**Purpose:** Parent creates a student account under their management
 
 ```bash
 curl -X POST "$BASE_URL/students" \
@@ -504,231 +1474,656 @@ curl -X POST "$BASE_URL/students" \
     "first_name": "Alice",
     "last_name": "Doe",
     "username": "alice_student",
-    "password": "studentpass"
+    "password": "studentpass123"
   }'
 ```
 
+**Response (201 Created):**
+```json
+{
+  "id": "660e8400-e29b-41d4-a716-446655440001",
+  "parent_id": "550e8400-e29b-41d4-a716-446655440000",
+  "first_name": "Alice",
+  "last_name": "Doe",
+  "username": "alice_student",
+  "created_at": "2026-03-09T10:05:00.000Z"
+}
+```
+
+**Note:** Student can now log in using their username and password.
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 400 | Missing required fields |
+| 401 | Not authenticated |
+| 403 | User is not a PARENT |
+| 409 | Username already exists |
+
 ---
 
-### List Parent's Students *(PARENT only)*
+### 6. List Parent's Students (PARENT only)
+
+**Purpose:** Get all students managed by the authenticated parent
 
 ```bash
 curl "$BASE_URL/parent/students" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+**Response (200 OK):**
+```json
+[
+  {
+    "id": "660e8400-e29b-41d4-a716-446655440001",
+    "first_name": "Alice",
+    "last_name": "Doe",
+    "username": "alice_student",
+    "created_at": "2026-03-09T10:05:00.000Z"
+  },
+  {
+    "id": "660e8400-e29b-41d4-a716-446655440002",
+    "first_name": "Bob",
+    "last_name": "Doe",
+    "username": "bob_student",
+    "created_at": "2026-03-09T10:10:00.000Z"
+  }
+]
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 401 | Not authenticated |
+| 403 | User is not a PARENT |
+
 ---
 
-### Create Lesson *(MENTOR only)*
+### 7. Create Lesson (MENTOR only)
+
+**Purpose:** Mentor creates a new lesson
 
 ```bash
 curl -X POST "$BASE_URL/lessons" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "title": "Math Basics",
-    "description": "Introduction to arithmetic"
+    "title": "Introduction to Algebra",
+    "description": "Learn basic algebraic concepts including variables, equations, and problem-solving strategies."
   }'
 ```
 
+**Response (201 Created):**
+```json
+{
+  "id": "770e8400-e29b-41d4-a716-446655440003",
+  "mentor_id": "550e8400-e29b-41d4-a716-446655440000",
+  "title": "Introduction to Algebra",
+  "description": "Learn basic algebraic concepts including variables, equations, and problem-solving strategies.",
+  "created_at": "2026-03-09T10:15:00.000Z"
+}
+```
+
+**Note:** mentor_id is automatically set from the authenticated user's token.
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 400 | Missing title or description |
+| 401 | Not authenticated |
+| 403 | User is not a MENTOR |
+
 ---
 
-### List All Lessons
+### 8. List All Lessons
+
+**Purpose:** Browse all available lessons (any authenticated user)
 
 ```bash
 curl "$BASE_URL/lessons" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+**Response (200 OK):**
+```json
+[
+  {
+    "id": "770e8400-e29b-41d4-a716-446655440003",
+    "title": "Introduction to Algebra",
+    "description": "Learn basic algebraic concepts...",
+    "mentor_id": "550e8400-e29b-41d4-a716-446655440000",
+    "mentor_name": "John Doe",
+    "created_at": "2026-03-09T10:15:00.000Z"
+  },
+  {
+    "id": "770e8400-e29b-41d4-a716-446655440004",
+    "title": "Python Programming",
+    "description": "Introduction to Python programming...",
+    "mentor_id": "550e8400-e29b-41d4-a716-446655440005",
+    "mentor_name": "Jane Smith",
+    "created_at": "2026-03-09T09:00:00.000Z"
+  }
+]
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 401 | Not authenticated |
+
 ---
 
-### Book Student into Lesson *(PARENT only)*
+### 9. Book Student into Lesson (PARENT only)
+
+**Purpose:** Enroll a student in a lesson
+
+**Note:** Accepts both snake_case and camelCase field names.
 
 ```bash
+# Using snake_case
 curl -X POST "$BASE_URL/bookings" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "student_id": "<STUDENT_UUID>",
-    "lesson_id": "<LESSON_UUID>"
+    "student_id": "660e8400-e29b-41d4-a716-446655440001",
+    "lesson_id": "770e8400-e29b-41d4-a716-446655440003"
+  }'
+
+# Using camelCase (also valid)
+curl -X POST "$BASE_URL/bookings" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "studentId": "660e8400-e29b-41d4-a716-446655440001",
+    "lessonId": "770e8400-e29b-41d4-a716-446655440003"
   }'
 ```
 
-| Code | Meaning |
-|---|---|
-| 201 | Booking created |
+**Response (201 Created):**
+```json
+{
+  "id": "880e8400-e29b-41d4-a716-446655440006",
+  "student_id": "660e8400-e29b-41d4-a716-446655440001",
+  "lesson_id": "770e8400-e29b-41d4-a716-446655440003",
+  "created_at": "2026-03-09T10:20:00.000Z"
+}
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 400 | Missing student_id or lesson_id |
+| 401 | Not authenticated |
 | 403 | Parent does not own the student |
-| 404 | Lesson not found |
-| 409 | Student already enrolled |
+| 404 | Student or lesson not found |
+| 409 | Student already enrolled in this lesson |
 
 ---
 
-### Create Session *(MENTOR only)*
+### 10. Create Session (MENTOR only)
+
+**Purpose:** Schedule a session for a lesson
 
 ```bash
 curl -X POST "$BASE_URL/sessions" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "lesson_id": "<LESSON_UUID>",
-    "date": "2026-03-08T10:00:00.000Z",
-    "topic": "Fractions",
-    "summary": "Basic fractions introduction"
+    "lesson_id": "770e8400-e29b-41d4-a716-446655440003",
+    "date": "2026-03-15T14:00:00.000Z",
+    "topic": "Solving Linear Equations",
+    "summary": "We will cover methods for solving single-variable linear equations."
   }'
 ```
 
+**Response (201 Created):**
+```json
+{
+  "id": "990e8400-e29b-41d4-a716-446655440007",
+  "lesson_id": "770e8400-e29b-41d4-a716-446655440003",
+  "date": "2026-03-15T14:00:00.000Z",
+  "topic": "Solving Linear Equations",
+  "summary": "We will cover methods for solving single-variable linear equations.",
+  "created_at": "2026-03-09T10:25:00.000Z"
+}
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 400 | Missing required fields, invalid date format |
+| 401 | Not authenticated |
+| 403 | Mentor does not own the lesson |
+| 404 | Lesson not found |
+
 ---
 
-### List Sessions for a Lesson
+### 11. List Sessions for a Lesson
+
+**Purpose:** View all scheduled sessions for a lesson
+
+**Access Control:** Only accessible to:
+- The mentor who created the lesson
+- Parents whose students are enrolled
+- Students enrolled in the lesson
 
 ```bash
-curl "$BASE_URL/lessons/<LESSON_UUID>/sessions" \
+curl "$BASE_URL/lessons/770e8400-e29b-41d4-a716-446655440003/sessions" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+**Response (200 OK):**
+```json
+[
+  {
+    "id": "990e8400-e29b-41d4-a716-446655440007",
+    "lesson_id": "770e8400-e29b-41d4-a716-446655440003",
+    "date": "2026-03-15T14:00:00.000Z",
+    "topic": "Solving Linear Equations",
+    "summary": "We will cover methods for solving single-variable linear equations.",
+    "created_at": "2026-03-09T10:25:00.000Z"
+  },
+  {
+    "id": "990e8400-e29b-41d4-a716-446655440008",
+    "date": "2026-03-22T14:00:00.000Z",
+    "topic": "Quadratic Equations",
+    "summary": "Introduction to solving quadratic equations.",
+    "created_at": "2026-03-09T10:30:00.000Z"
+  }
+]
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 401 | Not authenticated |
+| 403 | User does not have access to this lesson |
+| 404 | Lesson not found |
+
 ---
 
-### List Students Enrolled in a Lesson *(MENTOR only)*
+### 12. List Students Enrolled in a Lesson (MENTOR only)
+
+**Purpose:** View all students enrolled in a lesson
 
 ```bash
-curl "$BASE_URL/lessons/<LESSON_UUID>/students" \
+curl "$BASE_URL/lessons/770e8400-e29b-41d4-a716-446655440003/students" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+**Response (200 OK):**
+```json
+[
+  {
+    "student_id": "660e8400-e29b-41d4-a716-446655440001",
+    "first_name": "Alice",
+    "last_name": "Doe",
+    "username": "alice_student",
+    "enrollment_date": "2026-03-09T10:20:00.000Z"
+  },
+  {
+    "student_id": "660e8400-e29b-41d4-a716-446655440002",
+    "first_name": "Bob",
+    "last_name": "Doe",
+    "username": "bob_student",
+    "enrollment_date": "2026-03-09T10:25:00.000Z"
+  }
+]
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 401 | Not authenticated |
+| 403 | User is not the mentor for this lesson |
+| 404 | Lesson not found |
+
 ---
 
-### List Lessons for a Student
+### 13. List Lessons for a Student
+
+**Purpose:** View all lessons a student is enrolled in
 
 ```bash
-curl "$BASE_URL/students/<STUDENT_UUID>/lessons" \
+curl "$BASE_URL/students/660e8400-e29b-41d4-a716-446655440001/lessons" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
----
-
-### Parent View of a Student's Lessons *(PARENT only)*
-
-```bash
-curl "$BASE_URL/parent/students/<STUDENT_UUID>/lessons" \
-  -H "Authorization: Bearer $TOKEN"
+**Response (200 OK):**
+```json
+[
+  {
+    "lesson_id": "770e8400-e29b-41d4-a716-446655440003",
+    "title": "Introduction to Algebra",
+    "description": "Learn basic algebraic concepts...",
+    "mentor_name": "John Doe",
+    "enrollment_date": "2026-03-09T10:20:00.000Z"
+  }
+]
 ```
 
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 401 | Not authenticated |
+| 403 | Parent does not own student, or student querying another student |
+| 404 | Student not found |
+
 ---
 
-### Mentor Lesson Dashboard *(MENTOR only)*
+### 14. Mentor Dashboard (MENTOR only)
 
-Returns all mentor lessons with student and session counts.
+**Purpose:** View all lessons created by mentor with student and session counts
 
 ```bash
 curl "$BASE_URL/mentor/lessons" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+**Response (200 OK):**
+```json
+[
+  {
+    "id": "770e8400-e29b-41d4-a716-446655440003",
+    "title": "Introduction to Algebra",
+    "description": "Learn basic algebraic concepts...",
+    "student_count": 2,
+    "session_count": 3,
+    "created_at": "2026-03-09T10:15:00.000Z"
+  },
+  {
+    "id": "770e8400-e29b-41d4-a716-446655440009",
+    "title": "Advanced Calculus",
+    "description": "Differential and integral calculus...",
+    "student_count": 5,
+    "session_count": 8,
+    "created_at": "2026-03-08T09:00:00.000Z"
+  }
+]
+```
+
+**Possible Errors:**
+
+| Code | Scenario |
+|------|----------|
+| 401 | Not authenticated |
+| 403 | User is not a MENTOR |
+
 ---
 
-### AI Summarization
+### 15. AI Summarization
+
+**Purpose:** Generate structured bullet-point summary of text
 
 ```bash
 curl -X POST "$BASE_URL/llm/summarize" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Artificial intelligence is transforming education by enabling personalized learning, automated grading, and better content accessibility."
+    "text": "Artificial intelligence (AI) is transforming education by enabling personalized learning experiences, automating administrative tasks, and providing intelligent tutoring systems. Machine learning algorithms analyze student performance data to identify learning gaps and recommend targeted interventions. Natural language processing powers chatbots that answer student questions 24/7. Computer vision enables automated grading of written assignments. However, concerns remain about data privacy, algorithmic bias, and the need for human oversight in educational decision-making."
   }'
 ```
+
+**Response (200 OK):**
+```json
+{
+  "summary": "{\"bullets\":[\"AI enables personalized learning and intelligent tutoring systems in education\",\"Machine learning analyzes student data to identify gaps and recommend interventions\",\"NLP chatbots provide 24/7 student support while computer vision automates grading\",\"Concerns exist about data privacy, bias, and need for human oversight\"],\"word_count\":48}",
+  "model": "gemini-2.5-flash"
+}
+```
+
+**Parsed Summary:**
+```json
+{
+  "bullets": [
+    "AI enables personalized learning and intelligent tutoring systems in education",
+    "Machine learning analyzes student data to identify gaps and recommend interventions",
+    "NLP chatbots provide 24/7 student support while computer vision automates grading",
+    "Concerns exist about data privacy, bias, and need for human oversight"
+  ],
+  "word_count": 48
+}
+```
+
+**Possible Errors:**
+
+| Code | Scenario | Response |
+|------|----------|----------|
+| 400 | Text missing | `{ "message": "Text is required" }` |
+| 400 | Text too short | `{ "message": "Text must be at least 50 characters" }` |
+| 413 | Text too long | `{ "message": "Text exceeds maximum length of 10000 characters" }` |
+| 429 | Rate limit | `{ "message": "Rate limit exceeded. Try again in 45 seconds." }` |
+| 502 | Gemini API error | `{ "message": "Failed to generate summary. Please try again later." }` |
 
 ---
 
 ## Environment Variables
 
-Create a `.env` file in the project root. All variables below are required.
+Create a `.env` file in the project root with the following variables:
 
 ```env
-# ─── Server ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
+# Port on which the server listens
 PORT=3000
 
-# ─── Database ──────────────────────────────────────────────────────────────────
-# Local:  DATABASE_URL=postgresql://root:root@localhost:5432/mentora
-# Docker: Use the DB container name as the host (not localhost)
-#         DATABASE_URL=postgresql://root:root@mentoraDB:5432/mentora
+# ─────────────────────────────────────────────────────────────────────────────
+# Database Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+# PostgreSQL connection string
+# Format: postgresql://<username>:<password>@<host>:<port>/<database>
+
+# Local development (PostgreSQL running on localhost)
+# DATABASE_URL=postgresql://root:rootpass@localhost:5432/mentora
+
+# Docker deployment (PostgreSQL in container named 'mentoraDB')
+# DATABASE_URL=postgresql://root:rootpass@mentoraDB:5432/mentora
 
 DATABASE_URL=postgresql://<db_user>:<db_password>@<db_host>:5432/<db_name>
 
-# ─── JWT ───────────────────────────────────────────────────────────────────────
-# Generate: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+# ─────────────────────────────────────────────────────────────────────────────
+# JWT Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
-JWT_SECRET=your_jwt_secret_here
+# Secret key for signing JWT tokens (must be strong and random)
+# Generate a secure key:
+# node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+JWT_SECRET=your_jwt_secret_here_replace_with_secure_random_string
+
+# Token expiration time (examples: '1h', '1d', '7d')
 JWT_EXPIRES_IN=1d
 
-# ─── LLM / Gemini ──────────────────────────────────────────────────────────────
-# API key from: https://aistudio.google.com/app/apikey
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM / Google Gemini Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
+# Google Gemini API key
+# Get your key from: https://aistudio.google.com/app/apikey
 GEMINI_API_KEY=your_gemini_api_key_here
+
+# Gemini model to use for summarization
 LLM_MODEL=gemini-2.5-flash
+
+# System prompt for summarization
+# IMPORTANT: This prompt must instruct the model to return ONLY valid JSON
 LLM_SUMMARIZE_PROMPT=You are an educational assistant. Summarize the provided text into bullet points. You must respond with ONLY a valid JSON object — no markdown, no code blocks, no extra text. Use exactly this format: {"bullets":["point one","point two","point three"],"word_count":42}. Rules: 3 to 6 bullets. Each bullet under 25 words. Total word_count must be under 120. Do not add information not present in the input.
 
-# ─── LLM Rate Limiting ─────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Rate Limiting Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
+# Time window for rate limiting (in milliseconds)
+# 60000 = 1 minute
 LLM_RATE_LIMIT_WINDOW_MS=60000
+
+# Maximum number of requests allowed per window
 LLM_RATE_LIMIT_MAX_REQUESTS=20
 
-# ─── Environment ───────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Environment
+# ─────────────────────────────────────────────────────────────────────────────
 
+# Set to 'production' in production, 'development' for local dev
 NODE_ENV=development
 ```
 
-> **Never commit your `.env` file.** It is listed in `.gitignore`.
+### Important Notes
+
+> **Never commit your `.env` file to Git.** It contains sensitive credentials.
+
+The `.env` file is already listed in `.gitignore`:
+```gitignore
+.env
+node_modules/
+```
+
+### Generating a Secure JWT Secret
+
+```bash
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+```
+
+This generates a 128-character hexadecimal string suitable for JWT signing.
 
 ---
 
 ## Getting Started
 
+### Prerequisites
+
+- **Node.js 20+** - [Download](https://nodejs.org/)
+- **PostgreSQL 16+** - [Download](https://www.postgresql.org/download/)
+- **Docker** (optional, for containerized deployment) - [Download](https://www.docker.com/)
+
+---
+
 ### Option A — Local Development
 
-**Prerequisites:** Node.js 20+, PostgreSQL running locally.
+**Best for:** Active development, debugging, testing changes
+
+#### Step 1: Clone Repository
 
 ```bash
-# 1. Clone the repository
-git clone <your-repo-url>
+git clone https://github.com/yourusername/mentora-backend.git
 cd mentora-backend
+```
 
-# 2. Install dependencies
+#### Step 2: Install Dependencies
+
+```bash
 npm install
+```
 
-# 3. Configure environment
+This installs all packages listed in `package.json`:
+- express
+- pg (PostgreSQL driver)
+- jsonwebtoken
+- bcryptjs
+- zod
+- dotenv
+- @google/generative-ai
+- express-rate-limit
+
+#### Step 3: Configure Environment
+
+```bash
 cp .env.example .env
-# Fill in your values
+```
 
-# 4. Create the database
-psql -U root -c "CREATE DATABASE mentora;"
+Edit `.env` and fill in your values:
+```env
+DATABASE_URL=postgresql://root:rootpass@localhost:5432/mentora
+JWT_SECRET=<generate with: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))">
+GEMINI_API_KEY=<get from https://aistudio.google.com/app/apikey>
+```
 
-# 5. Apply the schema (once only)
-psql -U root -d mentora -f src/db/create_schema.sql
+#### Step 4: Create Database
 
-# 6. Start the server
+```bash
+# Connect to PostgreSQL as superuser
+psql -U postgres
+
+# Create database
+postgres=# CREATE DATABASE mentora;
+
+# Create user (if needed)
+postgres=# CREATE USER root WITH PASSWORD 'root';
+
+# Grant privileges
+postgres=# GRANT ALL PRIVILEGES ON DATABASE mentora TO root;
+
+# Exit
+postgres=# \q
+```
+
+#### Step 5: Apply Schema
+
+```bash
+psql -U root -d mentora -f src/db/Create_schema.sql
+```
+
+**Expected output:**
+```
+CREATE EXTENSION
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+```
+
+#### Step 6: Start Server
+
+```bash
 node src/server.js
 ```
 
-Verify:
+**Expected output:**
+```
+[2026-03-09T10:00:00.000Z] Database connected successfully
+[2026-03-09T10:00:00.000Z] Server running on port 3000
+```
+
+#### Step 7: Verify
+
 ```bash
 curl "http://localhost:3000/api/health"
-# Expected: OK
+```
+
+**Expected response:**
+```
+OK
 ```
 
 ---
 
 ### Option B — Docker Deployment
 
-This runs both the database and the backend as Docker containers on a shared bridge network.
+**Best for:** Production deployment, environment isolation, reproducible builds
 
-#### Step 1 — Create a shared Docker network
+This setup runs both PostgreSQL and the Node.js backend in Docker containers on a shared network.
+
+#### Step 1: Create Docker Network
 
 ```bash
 docker network create mentoraBridge
 ```
 
-#### Step 2 — Start the database container
+This creates a bridge network allowing containers to communicate using container names as hostnames.
+
+#### Step 2: Start PostgreSQL Container
 
 ```bash
 docker run -d \
@@ -742,25 +2137,73 @@ docker run -d \
   postgres:16
 ```
 
-#### Step 3 — Apply the schema *(once only)*
+**Flags explained:**
+- `-d` - Run in detached mode (background)
+- `--name mentoraDB` - Container name (used as hostname in Docker network)
+- `--network mentoraBridge` - Connect to our custom network
+- `-e` - Set environment variables
+- `-p 5432:5432` - Expose port 5432 to host (for debugging)
+- `--restart unless-stopped` - Auto-restart on failure or VM reboot
+
+#### Step 3: Apply Database Schema
+
+Wait 5 seconds for PostgreSQL to initialize, then apply schema:
 
 ```bash
-docker exec -i mentoraDB psql -U root -d mentora < src/db/create_schema.sql
+docker exec -i mentoraDB psql -U root -d mentora < src/db/Create_schema.sql
 ```
 
-#### Step 4 — Configure `.env`
+**Expected output:**
+```
+CREATE EXTENSION
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+```
 
-Set `DATABASE_URL` to use the container name as the host:
+#### Step 4: Configure Environment
+
+Create `.env` file with Docker-specific settings:
 
 ```env
+PORT=3000
 DATABASE_URL=postgresql://root:root@mentoraDB:5432/mentora
+JWT_SECRET=<your-secret-here>
+JWT_EXPIRES_IN=1d
+GEMINI_API_KEY=<your-key-here>
+LLM_MODEL=gemini-2.5-flash
+LLM_SUMMARIZE_PROMPT=You are an educational assistant. Summarize the provided text into bullet points. You must respond with ONLY a valid JSON object — no markdown, no code blocks, no extra text. Use exactly this format: {"bullets":["point one","point two","point three"],"word_count":42}. Rules: 3 to 6 bullets. Each bullet under 25 words. Total word_count must be under 120. Do not add information not present in the input.
+LLM_RATE_LIMIT_WINDOW_MS=60000
+LLM_RATE_LIMIT_MAX_REQUESTS=20
+NODE_ENV=production
 ```
 
-#### Step 5 — Build and run the backend container
+**Important:** Use `mentoraDB` (container name) as the database host, **not** `localhost`.
+
+#### Step 5: Build Backend Image
 
 ```bash
 docker build -t mentora_backend_image .
+```
 
+**Dockerfile overview:**
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+EXPOSE 3000
+CMD ["node", "src/server.js"]
+```
+
+**Build time:** ~2-3 minutes
+
+#### Step 6: Run Backend Container
+
+```bash
 docker run -d \
   --name mentora_backend_container \
   --network mentoraBridge \
@@ -770,44 +2213,458 @@ docker run -d \
   mentora_backend_image
 ```
 
-#### Step 6 — Verify
+**Flags explained:**
+- `--env-file .env` - Load environment variables from file
+- `-p 3000:3000` - Expose port 3000 to host
+
+#### Step 7: Verify
 
 ```bash
+# Check container logs
+docker logs mentora_backend_container
+
+# Expected output:
+# [2026-03-09T10:00:00.000Z] Database connected successfully
+# [2026-03-09T10:00:00.000Z] Server running on port 3000
+
+# Test health endpoint
 curl "http://localhost:3000/api/health"
+
 # Expected: OK
-```
-
-#### Rebuilding after code changes
-
-```bash
-docker rm -f mentora_backend_container
-docker rmi mentora_backend_image
-docker build -t mentora_backend_image .
-docker run -d \
-  --name mentora_backend_container \
-  --network mentoraBridge \
-  --env-file .env \
-  -p 3000:3000 \
-  --restart unless-stopped \
-  mentora_backend_image
 ```
 
 ---
 
-## Typical Workflow
+### Docker Management Commands
 
-| Step | Action |
-|---|---|
-| 1 | **Signup** — Create a PARENT or MENTOR account |
-| 2 | **Login** — Receive a JWT token |
-| 3 | **Export token** — `export TOKEN="<your-jwt-token>"` |
-| 4 | **Create resources** — Students, lessons, bookings, sessions |
-| 5 | **Query dashboards** — Use mentor and parent dashboard endpoints |
-| 6 | **Summarize** — Use the AI endpoint as needed |
-
-All protected endpoints require:
+#### View Running Containers
+```bash
+docker ps
 ```
-Authorization: Bearer <JWT_TOKEN>
+
+#### Stop Containers
+```bash
+docker stop mentora_backend_container mentoraDB
+```
+
+#### Start Containers
+```bash
+docker start mentoraDB
+docker start mentora_backend_container
+```
+
+#### View Logs
+```bash
+# Backend logs
+docker logs -f mentora_backend_container
+
+# Database logs
+docker logs -f mentoraDB
+```
+
+#### Remove Containers
+```bash
+docker rm -f mentora_backend_container mentoraDB
+```
+
+#### Rebuild After Code Changes
+
+```bash
+# 1. Stop and remove old container
+docker rm -f mentora_backend_container
+
+# 2. Remove old image
+docker rmi mentora_backend_image
+
+# 3. Rebuild image
+docker build -t mentora_backend_image .
+
+# 4. Run new container
+docker run -d \
+  --name mentora_backend_container \
+  --network mentoraBridge \
+  --env-file .env \
+  -p 3000:3000 \
+  --restart unless-stopped \
+  mentora_backend_image
+```
+
+#### Database Backup
+
+```bash
+# Create backup
+docker exec mentoraDB pg_dump -U root mentora > backup.sql
+
+# Restore from backup
+docker exec -i mentoraDB psql -U root -d mentora < backup.sql
+```
+
+---
+
+## Testing
+
+The project includes **basic validator tests** to verify input handling:
+
+### Run Tests
+
+```bash
+npm test
+```
+
+**Expected output:**
+```
+TAP version 13
+# Subtest: Bookings Validator
+    ok 1 - accepts snake_case fields
+    ok 2 - accepts camelCase fields
+    ok 3 - rejects missing fields
+# Subtest: Sessions Validator
+    ok 1 - accepts snake_case fields
+    ok 2 - accepts camelCase fields
+    ok 3 - validates date format
+1..6
+# tests 6
+# pass 6
+# fail 0
+```
+
+### Current Test Coverage
+
+**Covered:**
+- ✅ Validator schemas (snake_case/camelCase input validation)
+- ✅ Zod error handling
+- ✅ Input format flexibility
+
+**Not Covered (Future Work):**
+- ❌ Service layer unit tests
+- ❌ Controller integration tests
+- ❌ End-to-end API tests
+- ❌ Database query tests
+- ❌ Authentication middleware tests
+
+### Test Files
+
+```
+tests/
+└── validators.test.js    # Validator schema tests
+```
+
+### Adding More Tests
+
+To expand test coverage, create additional test files:
+
+```javascript
+// tests/services/auth.service.test.js
+const { describe, it } = require('node:test');
+const assert = require('node:assert');
+const authService = require('../../src/services/auth.service');
+
+describe('Auth Service', () => {
+  it('should hash passwords correctly', async () => {
+    const hash = await authService.hashPassword('testpass');
+    assert.ok(hash);
+    assert.notEqual(hash, 'testpass');
+  });
+});
+```
+
+---
+
+## Known Limitations
+
+This implementation focuses on **core assignment requirements**. The following features are **intentionally not implemented**:
+
+### ❌ Optional Features Not Included
+
+- **Join session endpoint** - Bonus feature from assignment (track session attendance)
+- **API versioning** - No `/v1/` or `/v2/` prefix support
+- **Password reset flow** - No email-based password recovery
+- **Email notifications** - No automated emails for bookings/sessions
+- **File uploads** - No support for lesson materials or attachments
+- **Real-time updates** - No WebSocket or Server-Sent Events
+- **Pagination** - All list endpoints return full results
+- **Search/filtering** - No advanced query capabilities
+- **Audit logging** - No activity tracking or change history
+
+### ⚠️ Scope Decisions
+
+- **Test coverage is minimal** - Only validator tests included (service/integration tests would be added in production)
+- **No refresh tokens** - Users must re-login after token expiry (24 hours)
+- **Rate limiting only on LLM endpoint** - No global rate limiting or abuse prevention
+- **No CORS restrictions** - Open to all origins (would be restricted in production)
+- **No request size limits** - Except for LLM text (10,000 chars)
+- **No database migrations** - Schema changes require manual SQL updates
+- **No monitoring/observability** - No Prometheus metrics, APM, or structured logging
+
+### 🔒 Security Considerations for Production
+
+Before deploying to production, consider adding:
+- **CORS configuration** - Restrict allowed origins
+- **Helmet.js** - Security headers (CSP, HSTS, etc.)
+- **Rate limiting** - Global rate limiter (express-rate-limit)
+- **Input sanitization** - Prevent XSS/SQL injection
+- **HTTPS enforcement** - Redirect all HTTP to HTTPS
+- **Database connection pooling limits** - Prevent connection exhaustion
+- **Request timeout middleware** - Prevent long-running requests
+- **SQL prepared statements** - Already using parameterized queries (✅)
+- **Environment-based secrets** - Already using .env (✅)
+
+**Note:** These omissions **do not affect core functionality** or assignment requirements. They represent areas for future enhancement in a production system.
+
+---
+
+## Troubleshooting
+
+### Database Connection Issues
+
+**Problem:** `Error: connect ECONNREFUSED 127.0.0.1:5432`
+
+**Solutions:**
+
+1. **Verify PostgreSQL is running:**
+```bash
+# macOS/Linux
+pg_isready
+
+# Windows
+pg_ctl status
+```
+
+2. **Check DATABASE_URL format:**
+```env
+# Local: use localhost
+DATABASE_URL=postgresql://root:root@localhost:5432/mentora
+
+# Docker: use container name
+DATABASE_URL=postgresql://root:root@mentoraDB:5432/mentora
+```
+
+3. **Verify database exists:**
+```bash
+psql -U root -l | grep mentora
+```
+
+4. **Check PostgreSQL logs:**
+```bash
+# macOS
+tail -f /usr/local/var/log/postgres.log
+
+# Linux
+tail -f /var/log/postgresql/postgresql-16-main.log
+
+# Docker
+docker logs mentoraDB
+```
+
+---
+
+### JWT Authentication Failures
+
+**Problem:** `401 Unauthorized` on protected endpoints
+
+**Solutions:**
+
+1. **Verify token format:**
+```bash
+# Correct format
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# ❌ Wrong - missing "Bearer"
+Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+2. **Check token expiration:**
+- Visit [jwt.io](https://jwt.io)
+- Paste your token
+- Check `exp` claim (Unix timestamp)
+- If expired, log in again to get new token
+
+3. **Verify JWT_SECRET matches:**
+- Ensure `.env` file has same `JWT_SECRET` used during signup/login
+- If changed, existing tokens are invalid
+
+4. **Check server logs:**
+```bash
+node src/server.js
+# Look for JWT verification errors
+```
+
+---
+
+### Docker Network Issues
+
+**Problem:** Backend can't connect to database in Docker
+
+**Solutions:**
+
+1. **Verify containers are on same network:**
+```bash
+docker network inspect mentoraBridge
+
+# Should show both containers:
+# - mentoraDB
+# - mentora_backend_container
+```
+
+2. **Check DATABASE_URL uses container name:**
+```env
+# ❌ Wrong - localhost doesn't work in Docker
+DATABASE_URL=postgresql://root:root@localhost:5432/mentora
+
+# ✅ Correct - use container name
+DATABASE_URL=postgresql://root:root@mentoraDB:5432/mentora
+```
+
+3. **Restart containers in order:**
+```bash
+docker restart mentoraDB
+sleep 5  # Wait for DB to initialize
+docker restart mentora_backend_container
+```
+
+---
+
+### Rate Limit on AI Endpoint
+
+**Problem:** `429 Too Many Requests` on `/llm/summarize`
+
+**Solutions:**
+
+1. **Wait for rate limit window to reset** (default: 60 seconds)
+
+2. **Increase rate limit in `.env`:**
+```env
+LLM_RATE_LIMIT_WINDOW_MS=60000     # 1 minute
+LLM_RATE_LIMIT_MAX_REQUESTS=50     # Increase from 20 to 50
+```
+
+3. **Check Gemini API quota:**
+- Visit [Google AI Studio](https://aistudio.google.com/)
+- Check API usage dashboard
+- Free tier: 60 requests/minute
+
+---
+
+### Schema Not Applied
+
+**Problem:** Tables don't exist
+
+**Solutions:**
+
+1. **Verify schema was applied:**
+```bash
+psql -U root -d mentora -c "\dt"
+
+# Expected output:
+#  Schema |    Name    | Type  | Owner
+# --------+------------+-------+-------
+#  public | users      | table | root
+#  public | students   | table | root
+#  public | lessons    | table | root
+#  public | bookings   | table | root
+#  public | sessions   | table | root
+```
+
+2. **Reapply schema:**
+```bash
+psql -U root -d mentora -f src/db/Create_schema.sql
+```
+
+3. **For Docker:**
+```bash
+docker exec -i mentoraDB psql -U root -d mentora < src/db/Create_schema.sql
+```
+
+---
+
+### Port Already in Use
+
+**Problem:** `Error: listen EADDRINUSE: address already in use :::3000`
+
+**Solutions:**
+
+1. **Find process using port 3000:**
+```bash
+# macOS/Linux
+lsof -i :3000
+
+# Windows
+netstat -ano | findstr :3000
+```
+
+2. **Kill the process:**
+```bash
+# macOS/Linux
+kill -9 <PID>
+
+# Windows
+taskkill /PID <PID> /F
+```
+
+3. **Use different port:**
+```env
+PORT=3001
+```
+
+---
+
+### Gemini API Errors
+
+**Problem:** `502 Bad Gateway` on summarization
+
+**Solutions:**
+
+1. **Verify API key is valid:**
+```bash
+curl "https://generativelanguage.googleapis.com/v1/models?key=$GEMINI_API_KEY"
+```
+
+2. **Check API key format in `.env`:**
+```env
+# ❌ Wrong - includes quotes
+GEMINI_API_KEY="AIzaSy..."
+
+# ✅ Correct - no quotes
+GEMINI_API_KEY=AIzaSy...
+```
+
+3. **Test with smaller text:**
+```bash
+curl -X POST "$BASE_URL/llm/summarize" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"This is a short test to verify the API works."}'
+```
+
+4. **Check Gemini service status:**
+- Visit [Google Cloud Status](https://status.cloud.google.com/)
+
+---
+
+### CORS Errors in Browser
+
+**Problem:** `Access-Control-Allow-Origin` error
+
+**Note:** CORS is currently **disabled** (allows all origins). If you've enabled CORS restrictions:
+
+**Solution:**
+
+1. **Update CORS config in `src/app.js`:**
+```javascript
+const cors = require('cors');
+
+app.use(cors({
+  origin: [
+    'http://localhost:5173',  // Local frontend
+    'https://mentora-app.unnambhargav.in'  // Production frontend
+  ],
+  credentials: true
+}));
+```
+
+2. **Install CORS package:**
+```bash
+npm install cors
 ```
 
 ---
@@ -818,12 +2675,185 @@ Copyright (C) 2026 Unnam Bhargav Sai Karthikeya Chowdary
 
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
 
-You are free to use, copy, modify, and distribute this software — including for commercial purposes — **provided that any derivative work or distribution is also released under the same GPL-3.0 license with full source code made publicly available**.
+### Terms
 
-Closing the source, sublicensing under a proprietary license, or distributing modified versions without making the source code available under GPL-3.0 constitutes a violation of this license and will be subject to legal action.
+You are free to:
+- ✅ **Use** — Run the software for any purpose
+- ✅ **Study** — Examine how the software works
+- ✅ **Modify** — Change the software to suit your needs
+- ✅ **Distribute** — Share copies of the software
+- ✅ **Commercial use** — Use the software for commercial purposes
 
-See the full license text at: [https://www.gnu.org/licenses/gpl-3.0.en.html](https://www.gnu.org/licenses/gpl-3.0.en.html)
+### Conditions
+
+You **must**:
+- 📄 **Disclose source** — Make the source code available when distributing
+- 📝 **Include license** — Include the GPL-3.0 license text with the software
+- 🔄 **Same license** — Distribute derivative works under GPL-3.0
+- 📋 **State changes** — Document modifications made to the software
+
+### Prohibited
+
+You **cannot**:
+- ❌ **Sublicense** — Change the license of the software or derivative works
+- ❌ **Close source** — Distribute without making source code available
+- ❌ **Proprietary forks** — Create closed-source derivatives
+
+### Legal Notice
+
+**Closing the source, sublicensing under a proprietary license, or distributing modified versions without making the source code available under GPL-3.0 constitutes a violation of this license and will be subject to legal action.**
+
+### Full License Text
+
+See the full license at: [https://www.gnu.org/licenses/gpl-3.0.en.html](https://www.gnu.org/licenses/gpl-3.0.en.html)
+
+### Why GPL-3.0?
+
+This license ensures that:
+1. The educational community benefits from improvements
+2. Derivative works remain open source
+3. Commercial use is permitted while maintaining transparency
+4. The software's freedom is preserved across all versions
 
 ---
 
-*Mentora is built for clarity and scale — with a clean service-oriented architecture that keeps routing, business logic, validation, and external integrations clearly separated and independently maintainable.*
+## Typical Workflow Example
+
+Here's a complete workflow showing how all components work together:
+
+### 1. Mentor Creates an Account and Lesson
+
+```bash
+# Mentor signs up
+curl -X POST "$BASE_URL/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "first_name": "Sarah",
+    "last_name": "Johnson",
+    "email": "sarah@example.com",
+    "phone": "1234567890",
+    "role": "MENTOR",
+    "username": "sarah_mentor",
+    "password": "securepass123"
+  }'
+
+# Mentor logs in
+curl -X POST "$BASE_URL/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "sarah_mentor",
+    "password": "securepass123"
+  }'
+# Save token as MENTOR_TOKEN
+
+# Mentor creates a lesson
+curl -X POST "$BASE_URL/lessons" \
+  -H "Authorization: Bearer $MENTOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Python for Beginners",
+    "description": "Learn Python programming from scratch"
+  }'
+# Save lesson_id
+```
+
+### 2. Parent Creates Students and Enrolls Them
+
+```bash
+# Parent signs up
+curl -X POST "$BASE_URL/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "first_name": "Michael",
+    "last_name": "Smith",
+    "email": "michael@example.com",
+    "phone": "9876543210",
+    "role": "PARENT",
+    "username": "michael_parent",
+    "password": "parentpass123"
+  }'
+
+# Parent logs in
+curl -X POST "$BASE_URL/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "michael_parent",
+    "password": "parentpass123"
+  }'
+# Save token as PARENT_TOKEN
+
+# Parent creates a student
+curl -X POST "$BASE_URL/students" \
+  -H "Authorization: Bearer $PARENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "first_name": "Emma",
+    "last_name": "Smith",
+    "username": "emma_student",
+    "password": "studentpass123"
+  }'
+# Save student_id
+
+# Parent enrolls student in lesson
+curl -X POST "$BASE_URL/bookings" \
+  -H "Authorization: Bearer $PARENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "student_id": "<student_id>",
+    "lesson_id": "<lesson_id>"
+  }'
+```
+
+### 3. Mentor Schedules Sessions
+
+```bash
+# Mentor creates session
+curl -X POST "$BASE_URL/sessions" \
+  -H "Authorization: Bearer $MENTOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lesson_id": "<lesson_id>",
+    "date": "2026-03-20T15:00:00.000Z",
+    "topic": "Python Basics - Variables and Data Types",
+    "summary": "Introduction to Python variables, data types, and basic operations"
+  }'
+```
+
+### 4. Student Views Their Lessons and Sessions
+
+```bash
+# Student logs in
+curl -X POST "$BASE_URL/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "emma_student",
+    "password": "studentpass123"
+  }'
+# Save token as STUDENT_TOKEN
+
+# Student views enrolled lessons
+curl "$BASE_URL/students/<student_id>/lessons" \
+  -H "Authorization: Bearer $STUDENT_TOKEN"
+
+# Student views upcoming sessions
+curl "$BASE_URL/lessons/<lesson_id>/sessions" \
+  -H "Authorization: Bearer $STUDENT_TOKEN"
+```
+
+### 5. Anyone Uses AI Summarization
+
+```bash
+# Mentor summarizes lesson notes
+curl -X POST "$BASE_URL/llm/summarize" \
+  -H "Authorization: Bearer $MENTOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Python is a high-level, interpreted programming language known for its simple syntax and readability. It supports multiple programming paradigms including procedural, object-oriented, and functional programming. Python has extensive standard libraries and a large ecosystem of third-party packages available through PyPI. Common applications include web development, data science, machine learning, automation, and scientific computing."
+  }'
+```
+
+---
+
+*Mentora is built for **clarity and scale** — with a clean service-oriented architecture that keeps routing, business logic, validation, and external integrations clearly separated and independently maintainable.*
+
+**Built with ❤️ for the educational community**
